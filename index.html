@@ -190,7 +190,7 @@ footer{max-width:1140px;margin:0 auto;padding:18px 22px;color:var(--muted);font-
 <script>
 // ==================== Config ====================
 var CLIENT_ID='595564106580-hsrunbvfacmr23d2jopl462taqilip75.apps.googleusercontent.com';
-var SCOPES='https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
+var SCOPES='https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/calendar';
 var CONFIG_FILENAME='choreia-report-config.json';
 var TOKEN_KEY='choreia_report_token';
 var CONFIG_CACHE_KEY='choreia_report_config_cache';
@@ -201,12 +201,12 @@ var MEMBER_FIELDS=['id','name','nameEn','dept','email','busRoute','a1','a2','act
 var DAY_FIELDS=['id','email','name','date',
   'planKind','dest','route','plan','planStatus','p1By','p1At','p1Act','p2By','p2At','p2Act',
   'attend','inT','outT','actRoute','done','busDiff','repStatus','r1By','r1At','r1Act','r2By','r2At','r2Act',
-  'updatedAt'];
+  'calEventId','updatedAt'];
 var COMMENT_FIELDS=['id','dayId','phase','by','byName','at','text'];
 var SETTING_FIELDS=['key','value'];
 var SHEET_DEFS=[
   {title:'メンバー',fields:MEMBER_FIELDS,headers:['ID','氏名','氏名(英)','所属','メール','申請ルート','1次承認者','2次承認者','在籍','メモ','更新日']},
-  {title:'日次',fields:DAY_FIELDS,headers:['ID','メール','氏名','対象日','予定区分','行き先','予定ルート','やること','計画状態','計画1次者','計画1次時刻','計画1次処理','計画2次者','計画2次時刻','計画2次処理','勤怠','出社','退社','実ルート','実行内容','ルート外','報告状態','報告1次者','報告1次時刻','報告1次処理','報告2次者','報告2次時刻','報告2次処理','更新日']},
+  {title:'日次',fields:DAY_FIELDS,headers:['ID','メール','氏名','対象日','予定区分','行き先','予定ルート','やること','計画状態','計画1次者','計画1次時刻','計画1次処理','計画2次者','計画2次時刻','計画2次処理','勤怠','出社','退社','実ルート','実行内容','ルート外','報告状態','報告1次者','報告1次時刻','報告1次処理','報告2次者','報告2次時刻','報告2次処理','予定イベントID','更新日']},
   {title:'やりとり',fields:COMMENT_FIELDS,headers:['ID','日次ID','フェーズ','送信者メール','送信者','時刻','本文']},
   {title:'設定',fields:SETTING_FIELDS,headers:['キー','値']}
 ];
@@ -374,6 +374,36 @@ async function saveMember(obj){obj.updatedAt=nowStr();var i=idxOf(members,obj.id
 async function saveDay(obj){obj.updatedAt=nowStr();var i=idxOf(days,obj.id);if(i===-1){days.push(obj);await appendRow('日次',obj,DAY_FIELDS);}else{days[i]=obj;await updateRowByIndex('日次',i,obj,DAY_FIELDS);}}
 async function addComment(dayId,phase,text){var c={id:nextId('C',comments),dayId:dayId,phase:phase,by:currentUser.email,byName:currentUser.name,at:nowStr(),text:text};comments.push(c);await appendRow('やりとり',c,COMMENT_FIELDS);}
 
+// ==================== カレンダー連携（各自の自分のカレンダーに同期） ====================
+// 他人のカレンダーには書けないので、本人のセッションで自分の承認済み予定だけを同期する。
+function calEventBody(d){
+  var title=(d.planKind==='休み')?'休み':((d.dest?d.dest:'予定')+(d.route?'（'+d.route+'）':''));
+  var desc=(d.planKind==='休み')?'休み予定':('ルート: '+(d.route||'—')+'\nやること:\n'+(d.plan||''));
+  var end=new Date(d.date+'T00:00:00');end.setDate(end.getDate()+1);
+  return {summary:title,description:desc,start:{date:d.date},end:{date:isoOf(end)},source:{title:'Choreia 報告',url:location.href}};
+}
+var _calSyncing=false;
+async function syncMyCalendar(){
+  if(_calSyncing)return;var m=myMember();if(!m)return;
+  var min=new Date();min.setDate(min.getDate()-30);var minISO=isoOf(min);
+  var mine=days.filter(function(d){return d.email.toLowerCase()===m.email.toLowerCase()&&d.date>=minISO;});
+  var touched=false;_calSyncing=true;
+  try{
+    for(var i=0;i<mine.length;i++){var d=mine[i];
+      try{
+        if(d.planStatus==='ok'&&!d.calEventId){
+          var ev=await apiFetch('https://www.googleapis.com/calendar/v3/calendars/primary/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(calEventBody(d))});
+          d.calEventId=ev.id;await saveDay(d);touched=true;
+        }else if(d.planStatus!=='ok'&&d.calEventId){
+          try{await authFetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+encodeURIComponent(d.calEventId),{method:'DELETE'});}catch(e){}
+          d.calEventId='';await saveDay(d);touched=true;
+        }
+      }catch(e){console.error('cal sync',e);}
+    }
+  }finally{_calSyncing=false;}
+  if(touched&&document.getElementById('view-main').style.display!=='none')render();
+}
+
 // ==================== Settings (admin) ====================
 function openSettings(){
   if(!isAdmin()){showToast('管理は管理者のみ');return;}
@@ -389,7 +419,7 @@ async function addAdmin(){var i=document.getElementById('add-admin'),e=(i.value|
 async function removeAdmin(e){if(e===orgConfig.admin){showToast('オーナーは外せません');return;}orgConfig.admins=(orgConfig.admins||[]).filter(function(x){return x!==e;});renderAdminList();await saveConfig();showToast(e+' を外しました');}
 
 // ==================== Tabs & render ====================
-function showMainView(){var sb=document.getElementById('btn-settings');if(sb)sb.style.display=isAdmin()?'':'none';ovMonth=ovMonth||thisMonth();planDate=planDate||tomorrowISO();var allowed=availableTabs().map(function(t){return t.k;});if(allowed.indexOf(tab)===-1)tab=allowed[0];showView('main');render();}
+function showMainView(){var sb=document.getElementById('btn-settings');if(sb)sb.style.display=isAdmin()?'':'none';ovMonth=ovMonth||thisMonth();planDate=planDate||tomorrowISO();var allowed=availableTabs().map(function(t){return t.k;});if(allowed.indexOf(tab)===-1)tab=allowed[0];showView('main');render();syncMyCalendar();}
 function availableTabs(){
   var t=[{k:'plan',label:'予定を出す'},{k:'do',label:'実行報告',badge:myNeedReport()},{k:'mine',label:'自分の履歴'},{k:'team',label:'みんなの報告'}];
   if(isApprover())t.push({k:'approve',label:'承認',badge:pendingForMe().length});
@@ -521,7 +551,7 @@ async function submitPlan(){
   var obj=ex?Object.assign({},ex):{id:nextId('D',days),email:m.email,name:m.name,date:date,attend:'',inT:'',outT:'',actRoute:'',done:'',busDiff:'',repStatus:'',r1By:'',r1At:'',r1Act:'',r2By:'',r2At:'',r2Act:''};
   Object.assign(obj,{planKind:kind,dest:kind==='休み'?'':dest,route:kind==='休み'?'':route,plan:kind==='休み'?'（休み予定）':plan,planStatus:startStatus(m),p1By:'',p1At:'',p1Act:'',p2By:'',p2At:'',p2Act:''});
   var btn=document.querySelector('.acts .btn');if(btn){btn.disabled=true;btn.textContent='提出中…';}
-  try{await saveDay(obj);showToast(obj.planStatus==='ok'?'予定を保存しました（承認者未設定のため承認済）':'予定を提出しました → '+nameOf(m.a1||m.a2)+'さんへ');render();}
+  try{await saveDay(obj);showToast(obj.planStatus==='ok'?'予定を保存しました（承認者未設定のため承認済）':'予定を提出しました → '+nameOf(m.a1||m.a2)+'さんへ');render();syncMyCalendar();}
   catch(e){showToast('提出に失敗しました: '+(e.message||e));if(btn)btn.disabled=false;}
 }
 
