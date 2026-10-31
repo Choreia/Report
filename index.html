@@ -196,7 +196,8 @@ var TOKEN_KEY='choreia_report_token';
 var CONFIG_CACHE_KEY='choreia_report_config_cache';
 var BLOCKED_DOMAINS=['gmail.com','googlemail.com','yahoo.co.jp','yahoo.com','hotmail.com','outlook.com','outlook.jp','icloud.com','me.com','mac.com','aol.com','protonmail.com','zoho.com','live.com','live.jp','msn.com','nifty.com','biglobe.ne.jp','ocn.ne.jp'];
 
-var MEMBER_FIELDS=['id','name','nameEn','dept','email','busRoute','a1','a2','active','memo','updatedAt'];
+var MEMBER_FIELDS=['id','name','nameEn','dept','email','busRoute','a1','a2','active','taskLock','memo','updatedAt'];
+var TASK_FIELDS=['id','title','assignee','active','memo','updatedAt'];
 // 1行=1人1日。計画(plan)と実績報告(rep)の2フェーズ、各フェーズに1次→2次承認。
 var DAY_FIELDS=['id','email','name','date',
   'planKind','dest','route','plan','planStatus','p1By','p1At','p1Act','p2By','p2At','p2Act',
@@ -205,10 +206,11 @@ var DAY_FIELDS=['id','email','name','date',
 var COMMENT_FIELDS=['id','dayId','phase','by','byName','at','text'];
 var SETTING_FIELDS=['key','value'];
 var SHEET_DEFS=[
-  {title:'メンバー',fields:MEMBER_FIELDS,headers:['ID','氏名','氏名(英)','所属','メール','申請ルート','1次承認者','2次承認者','在籍','メモ','更新日']},
+  {title:'メンバー',fields:MEMBER_FIELDS,headers:['ID','氏名','氏名(英)','所属','メール','申請ルート','1次承認者','2次承認者','在籍','タスク限定','メモ','更新日']},
   {title:'日次',fields:DAY_FIELDS,headers:['ID','メール','氏名','対象日','予定区分','行き先','予定ルート','やること','計画状態','計画1次者','計画1次時刻','計画1次処理','計画2次者','計画2次時刻','計画2次処理','勤怠','出社','退社','実ルート','実行内容','ルート外','報告状態','報告1次者','報告1次時刻','報告1次処理','報告2次者','報告2次時刻','報告2次処理','予定イベントID','更新日']},
   {title:'やりとり',fields:COMMENT_FIELDS,headers:['ID','日次ID','フェーズ','送信者メール','送信者','時刻','本文']},
-  {title:'設定',fields:SETTING_FIELDS,headers:['キー','値']}
+  {title:'設定',fields:SETTING_FIELDS,headers:['キー','値']},
+  {title:'タスク',fields:TASK_FIELDS,headers:['ID','タスク','割当','有効','メモ','更新日']}
 ];
 var PLAN_KINDS=['出勤','休み'];
 var ATTENDS=['出勤','半休','休み','突発休み'];
@@ -217,7 +219,7 @@ var ATTENDS=['出勤','半休','休み','突発休み'];
 var tokenClient=null,accessToken=null;
 var currentUser={email:'',name:'',domain:'',photo:''};
 var orgConfig=null;
-var members=[],days=[],comments=[],sheetSettings={},dataLoadError=null;
+var members=[],days=[],comments=[],tasks=[],sheetSettings={},dataLoadError=null;
 var setupDriveId='',setupDriveName='',setupFolderId='',setupFolderName='',setupFolderPath=[];
 var tab='plan', selId=null, planDate=null, ovMonth=null, teamFilter='';
 
@@ -280,7 +282,7 @@ async function onTokenResponse(resp){
 function setUser(u){currentUser.email=u.emailAddress||'';currentUser.name=u.displayName||currentUser.email;currentUser.domain=currentUser.email.split('@')[1]||'';currentUser.photo=u.photoLink||'';}
 function showLoggedIn(){document.getElementById('user-name').textContent=currentUser.name;var av=document.getElementById('user-avatar');if(currentUser.photo){av.src=currentUser.photo;av.style.display='';}document.getElementById('auth-out').style.display='none';document.getElementById('user-area').style.display='flex';}
 function handleSignIn(){if(!tokenClient){showToast('準備中です。少し待ってからもう一度押してください');return;}tokenClient.requestAccessToken({prompt:'consent'});}
-function handleSignOut(){if(accessToken)google.accounts.oauth2.revoke(accessToken);accessToken=null;localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(CONFIG_CACHE_KEY);orgConfig=null;members=[];days=[];comments=[];document.getElementById('auth-out').style.display='';document.getElementById('user-area').style.display='none';document.getElementById('btn-settings').style.display='none';showView('welcome');}
+function handleSignOut(){if(accessToken)google.accounts.oauth2.revoke(accessToken);accessToken=null;localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(CONFIG_CACHE_KEY);orgConfig=null;members=[];days=[];comments=[];tasks=[];document.getElementById('auth-out').style.display='';document.getElementById('user-area').style.display='none';document.getElementById('btn-settings').style.display='none';showView('welcome');}
 function showView(name){['welcome','loading','setup','main'].forEach(function(v){var el=document.getElementById('view-'+v);if(el)el.style.display=(v===name)?'':'none';});}
 
 // ==================== Config / Setup ====================
@@ -365,6 +367,7 @@ async function loadAllData(){
   days=parseRows(vr[1]&&vr[1].values,DAY_FIELDS);
   comments=parseRows(vr[2]&&vr[2].values,COMMENT_FIELDS);
   sheetSettings={};parseRows(vr[3]&&vr[3].values,SETTING_FIELDS).forEach(function(r){sheetSettings[r.key]=r.value;});
+  tasks=parseRows(vr[4]&&vr[4].values,TASK_FIELDS);
   dataLoadError=null;
 }
 async function loadAllDataSafe(){try{await loadAllData();}catch(e){dataLoadError=e;console.error('loadAllData',e);showToast(/403/.test(String(e&&e.message))?'スプレッドシートを読めません（共有ドライブの権限がありません）':'データの読み込みに失敗しました');}}
@@ -425,6 +428,7 @@ function availableTabs(){
   if(isApprover())t.push({k:'approve',label:'承認',badge:pendingForMe().length});
   if(isApprover()||isAdmin())t.push({k:'kanri',label:'管理',badge:kanriAlertCount()});
   if(isApprover()||isAdmin())t.push({k:'overview',label:'一覧・集計'});
+  if(isAdmin())t.push({k:'tasks',label:'タスク'});
   if(isAdmin())t.push({k:'members',label:'メンバー'});
   return t;
 }
@@ -438,6 +442,7 @@ function render(){
   else if(tab==='approve')h=viewApprove();
   else if(tab==='kanri')h=viewKanri();
   else if(tab==='overview')h=viewOverview();
+  else if(tab==='tasks')h=viewTasks();
   else if(tab==='members')h=viewMembers();
   document.getElementById('main').innerHTML=h;
   if(tab==='plan')wirePlanForm();
@@ -503,6 +508,17 @@ function viewPlan(){
   var a1n=m.a1?nameOf(m.a1):'（なし）', a2n=m.a2?nameOf(m.a2):'';
   var locked=ex&&(ex.planStatus==='wait1'||ex.planStatus==='wait2'||ex.planStatus==='ok');
   var recent=daysOf(m.email).slice(0,8);
+  var taskLocked=m.taskLock==='yes';
+  var myTasks=myTasksFor(m);
+  var planInput;
+  if(taskLocked){
+    planInput='<label class="fl">タスク（指定から選ぶ）</label>'+
+      (myTasks.length?'<div id="p_tasks" style="display:flex;flex-direction:column;gap:6px;margin-top:4px">'+myTasks.map(function(t){return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:.9rem"><input type="checkbox" value="'+escapeAttr(t.title)+'" style="width:auto;margin-top:5px"> <span>'+escapeHtml(t.title)+(t.memo?' <span class="hint">'+escapeHtml(t.memo)+'</span>':'')+'</span></label>';}).join('')+'</div>':'<div class="hint">指定タスクがありません。管理者がタスクを割り当てます。</div>')+
+      '<label class="fl" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="p_other_on" style="width:auto" onchange="var o=document.getElementById(\'p_other_wrap\');if(o)o.hidden=!this.checked"> リストにない作業をする（承認が必要）</label>'+
+      '<div id="p_other_wrap" hidden><input type="text" id="p_other_txt" placeholder="その他の作業内容"></div>';
+  }else{
+    planInput='<label class="fl">やること（予定）</label><textarea id="p_plan" rows="4" placeholder="明日やる予定の作業">'+escapeHtml(plan)+'</textarea>';
+  }
   return '<h2>予定を出す</h2><p class="viewdesc">明日どこへ、どのルートで行き、何をするか。出すと '+escapeHtml(a1n)+(a2n?'（1次）→ '+escapeHtml(a2n)+'（2次）':'')+' の承認へ回ります。承認されてから実行してください。</p>'+
   '<div class="cols split"><div>'+
     '<div class="card"><label class="fl">対象日</label><input type="date" id="p_date" value="'+escapeAttr(date)+'" onchange="planDate=this.value;render()">'+
@@ -511,7 +527,7 @@ function viewPlan(){
     '<div class="card" id="p_workfields"><label class="fl">行き先</label><input type="text" id="p_dest" value="'+escapeAttr(dest)+'" placeholder="例：カスミ ○○店 / 社内 / 在宅">'+
       '<label class="fl">ルート（どう行くか）</label><input type="text" id="p_route" value="'+escapeAttr(route)+'" placeholder="例：榛原→細江">'+
       '<div style="margin-top:7px"><button type="button" class="btn ghost small" onclick="openMapsFromPlan()">🗺 Googleマップでルートを開く</button></div>'+
-      '<label class="fl">やること（予定）</label><textarea id="p_plan" rows="4" placeholder="明日やる予定の作業">'+escapeHtml(plan)+'</textarea></div>'+
+      planInput+'</div>'+
     '<div class="acts"><button class="btn" onclick="submitPlan()">'+(ex?'予定を上書きして再提出':'予定を提出')+'</button></div>'+
   '</div><div>'+
     '<div class="note"><b>あなたの承認者</b><br>1次：'+escapeHtml(a1n)+(a2n?'<br>2次：'+escapeHtml(a2n):'')+'<br><span style="color:var(--muted)">承認者は管理者が「メンバー」で設定します。</span></div>'+
@@ -544,14 +560,33 @@ async function submitPlan(){
   var m=myMember();if(!m){showToast('メンバー登録がありません');return;}
   var date=document.getElementById('p_date').value;if(!date){showToast('対象日を選んでください');return;}
   var kind=(document.querySelector('#p_kind button.on')||{dataset:{v:'出勤'}}).dataset.v;
-  var dest=document.getElementById('p_dest').value.trim(), route=document.getElementById('p_route').value.trim(), plan=document.getElementById('p_plan').value.trim();
+  var dest=document.getElementById('p_dest').value.trim(), route=document.getElementById('p_route').value.trim();
+  var taskLocked=m.taskLock==='yes';
+  var planText='', offList=false;
+  if(kind==='休み'){planText='（休み予定）';}
+  else if(taskLocked){
+    var checked=[].slice.call(document.querySelectorAll('#p_tasks input:checked')).map(function(c){return c.value;});
+    var otherOn=document.getElementById('p_other_on')&&document.getElementById('p_other_on').checked;
+    var otherTxt=otherOn?((document.getElementById('p_other_txt')||{}).value||'').trim():'';
+    if(!checked.length&&!otherTxt){showToast('指定タスクを選ぶか、その他を記入してください');return;}
+    offList=!!otherTxt;
+    planText=checked.join('、')+(otherTxt?((checked.length?' / ':'')+'その他: '+otherTxt):'');
+  }else{
+    planText=(document.getElementById('p_plan').value||'').trim();
+    if(!planText){showToast('やること（予定）を入れてください');return;}
+  }
   if(kind==='出勤'&&!route){showToast('ルート（どう行くか）を入れてください');return;}
-  if(kind==='出勤'&&!plan){showToast('やること（予定）を入れてください');return;}
+  var ps;
+  if(kind==='休み')ps=startStatus(m);
+  else if(taskLocked&&!offList)ps='ok';
+  else ps=startStatus(m);
   var ex=dayByEmailDate(m.email,date);
   var obj=ex?Object.assign({},ex):{id:nextId('D',days),email:m.email,name:m.name,date:date,attend:'',inT:'',outT:'',actRoute:'',done:'',busDiff:'',repStatus:'',r1By:'',r1At:'',r1Act:'',r2By:'',r2At:'',r2Act:''};
-  Object.assign(obj,{planKind:kind,dest:kind==='休み'?'':dest,route:kind==='休み'?'':route,plan:kind==='休み'?'（休み予定）':plan,planStatus:startStatus(m),p1By:'',p1At:'',p1Act:'',p2By:'',p2At:'',p2Act:''});
+  Object.assign(obj,{planKind:kind,dest:kind==='休み'?'':dest,route:kind==='休み'?'':route,plan:planText,planStatus:ps,p1By:'',p1At:'',p1Act:'',p2By:'',p2At:'',p2Act:''});
   var btn=document.querySelector('.acts .btn');if(btn){btn.disabled=true;btn.textContent='提出中…';}
-  try{await saveDay(obj);showToast(obj.planStatus==='ok'?'予定を保存しました（承認者未設定のため承認済）':'予定を提出しました → '+nameOf(m.a1||m.a2)+'さんへ');render();syncMyCalendar();}
+  try{await saveDay(obj);
+    var msg=(ps==='ok')?(taskLocked&&!offList?'指定タスクの予定を登録しました（承認不要）':'予定を保存しました（承認者未設定のため承認済）'):('予定を提出しました → '+nameOf(m.a1||m.a2)+'さんへ'+(offList?'（リスト外のため承認が必要）':''));
+    showToast(msg);render();syncMyCalendar();}
   catch(e){showToast('提出に失敗しました: '+(e.message||e));if(btn)btn.disabled=false;}
 }
 
@@ -786,6 +821,38 @@ function viewOverview(){
       :'<div class="emptybox">在籍メンバーがいません。「メンバー」で登録してください。</div>');
 }
 
+// ==================== view: tasks (admin・指定タスク) ====================
+function myTasksFor(m){var e=(m.email||'').toLowerCase();return tasks.filter(function(t){return t.active!=='no'&&((t.assignee||'')===''||(t.assignee||'').toLowerCase()===e);});}
+async function saveTaskRec(obj){obj.updatedAt=nowStr();var i=idxOf(tasks,obj.id);if(i===-1){tasks.push(obj);await appendRow('タスク',obj,TASK_FIELDS);}else{tasks[i]=obj;await updateRowByIndex('タスク',i,obj,TASK_FIELDS);}}
+function viewTasks(){
+  var rows=tasks.map(function(t){
+    var who=t.assignee?nameOf(t.assignee):'全員';
+    return '<div class="cfgrow" style="grid-template-columns:1.7fr 1fr auto auto"><div style="min-width:0"><b>'+escapeHtml(t.title)+'</b>'+(t.memo?'<br><span class="hint">'+escapeHtml(t.memo)+'</span>':'')+'</div>'+
+      '<div>'+escapeHtml(who)+'</div>'+
+      '<div>'+(t.active==='no'?'<span class="badge b-mut">停止</span>':'<span class="badge b-ok">有効</span>')+'</div>'+
+      '<div><button class="btn ghost small" onclick="openTaskForm(\''+t.id+'\')">編集</button></div></div>';
+  }).join('');
+  return '<h2>タスク（指定）</h2><p class="viewdesc">メンバーが予定で選べるタスクを管理します。「タスク限定」のメンバーは、ここで割り当てたタスクからしか選べません。リスト外の作業を入れた予定は承認が必要になります。</p>'+
+    '<div class="bar"><span class="spacer"></span><button class="btn" onclick="openTaskForm()">＋ タスクを追加</button></div>'+
+    (tasks.length?'<div class="card"><div class="cfghdr" style="grid-template-columns:1.7fr 1fr auto auto"><div>タスク</div><div>割当</div><div>状態</div><div></div></div>'+rows+'</div>':'<div class="emptybox">まだタスクがありません。「＋ タスクを追加」から登録してください。</div>');
+}
+function openTaskForm(id){
+  var t=id?byId(tasks,id):{id:'',title:'',assignee:'',active:'yes',memo:''};
+  var opts='<option value="">全員</option>'+members.map(function(m){return '<option value="'+escapeAttr(m.email)+'" '+(m.email===t.assignee?'selected':'')+'>'+escapeHtml(m.name)+'</option>';}).join('');
+  openModal('<h3>'+(id?'タスクを編集':'タスクを追加')+'</h3>'+
+    '<label class="fl">タスク名</label><input type="text" id="t_title" value="'+escapeAttr(t.title)+'" placeholder="例：TEF引継ぎ資料の読み込み">'+
+    '<label class="fl">割当（このタスクを選べる人）</label><select id="t_assignee">'+opts+'</select>'+
+    '<label class="fl">メモ（任意）</label><input type="text" id="t_memo" value="'+escapeAttr(t.memo||'')+'">'+
+    '<label class="fl">状態</label><select id="t_active"><option value="yes" '+(t.active!=='no'?'selected':'')+'>有効</option><option value="no" '+(t.active==='no'?'selected':'')+'>停止</option></select>'+
+    '<div class="actions"><button class="btn ghost" onclick="closeModal()">やめる</button><button class="btn" onclick="saveTaskForm(\''+(t.id||'')+'\')">保存</button></div>');
+}
+async function saveTaskForm(id){
+  var title=document.getElementById('t_title').value.trim();if(!title){showToast('タスク名を入力してください');return;}
+  var t=id?byId(tasks,id):{id:nextId('T',tasks)};
+  t.title=title;t.assignee=document.getElementById('t_assignee').value;t.memo=document.getElementById('t_memo').value.trim();t.active=document.getElementById('t_active').value;
+  try{await saveTaskRec(t);closeModal();showToast('タスクを保存しました');render();}catch(e){showToast('保存に失敗しました: '+(e.message||e));}
+}
+
 // ==================== view: members (admin) ====================
 function viewMembers(){
   var rows=members.map(function(m){
@@ -801,15 +868,16 @@ function viewMembers(){
 function memberOptions(sel){return '<option value="">（なし）</option>'+members.map(function(x){return '<option value="'+escapeAttr(x.email)+'" '+(x.email===sel?'selected':'')+'>'+escapeHtml(x.name)+'</option>';}).join('');}
 async function setApprover(id,slot,val){var m=byId(members,id);if(!m)return;m[slot]=val;try{await saveMember(m);showToast(m.name+'さんの'+(slot==='a1'?'1次':'2次')+'承認者を '+(val?nameOf(val):'（なし）')+' に変更');render();}catch(e){showToast('保存に失敗しました: '+(e.message||e));}}
 function openMemberForm(id){
-  var m=id?byId(members,id):{id:'',name:'',dept:'',email:'',busRoute:'',a1:'',a2:'',active:'yes'};
+  var m=id?byId(members,id):{id:'',name:'',dept:'',email:'',busRoute:'',a1:'',a2:'',active:'yes',taskLock:''};
   openModal('<h3>'+(id?'メンバーを編集':'メンバーを追加')+'</h3>'+
     '<label class="fl">氏名</label><input type="text" id="m_name" value="'+escapeAttr(m.name)+'">'+
     '<label class="fl">所属</label><input type="text" id="m_dept" value="'+escapeAttr(m.dept)+'" placeholder="例：システム部 / D-Base">'+
     '<label class="fl">メール（ログインに使うGoogleアカウント）</label><input type="email" id="m_email" value="'+escapeAttr(m.email)+'" placeholder="name@m2-labo.jp">'+
     '<label class="fl">申請ルート（既定のバス）</label><input type="text" id="m_route" value="'+escapeAttr(m.busRoute)+'" placeholder="例：榛原→細江">'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><label class="fl">1次承認者</label><select id="m_a1">'+memberOptionsFull(m.a1)+'</select></div><div><label class="fl">2次承認者</label><select id="m_a2">'+memberOptionsFull(m.a2)+'</select></div></div>'+
-    '<label class="fl">在籍</label><select id="m_active"><option value="yes" '+(m.active!=='no'?'selected':'')+'>在籍</option><option value="no" '+(m.active==='no'?'selected':'')+'>休止</option></select>'+
-    '<p class="hint" style="margin-top:8px">承認者に設定したい人（例：吉田さん・安河内さん）も、先にメンバーとして登録してください。</p>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><label class="fl">在籍</label><select id="m_active"><option value="yes" '+(m.active!=='no'?'selected':'')+'>在籍</option><option value="no" '+(m.active==='no'?'selected':'')+'>休止</option></select></div>'+
+    '<div><label class="fl">予定の入力</label><select id="m_tasklock"><option value="" '+(m.taskLock!=='yes'?'selected':'')+'>自由に書ける</option><option value="yes" '+(m.taskLock==='yes'?'selected':'')+'>指定タスクからのみ</option></select></div></div>'+
+    '<p class="hint" style="margin-top:8px">「指定タスクからのみ」にすると、その人は「タスク」で割り当てた作業からしか予定を選べません。リスト外の作業を入れた予定は承認が必要です。承認者に設定したい人（例：吉田さん・安河内さん）も、先にメンバー登録してください。</p>'+
     '<div class="actions"><button class="btn ghost" onclick="closeModal()">やめる</button><button class="btn" onclick="saveMemberForm(\''+(m.id||'')+'\')">保存</button></div>');
 }
 function memberOptionsFull(sel){return '<option value="">（なし）</option>'+members.map(function(x){return '<option value="'+escapeAttr(x.email)+'" '+(x.email===sel?'selected':'')+'>'+escapeHtml(x.name)+'（'+escapeHtml(x.email)+'）</option>';}).join('');}
@@ -820,7 +888,7 @@ async function saveMemberForm(id){
   var dup=memberByEmail(email);if(dup&&dup.id!==id){showToast('このメールは既に登録されています');return;}
   var m=id?byId(members,id):{id:nextId('M',members)};
   m.name=name;m.email=email;m.dept=document.getElementById('m_dept').value.trim();m.busRoute=document.getElementById('m_route').value.trim();
-  m.a1=document.getElementById('m_a1').value;m.a2=document.getElementById('m_a2').value;m.active=document.getElementById('m_active').value;
+  m.a1=document.getElementById('m_a1').value;m.a2=document.getElementById('m_a2').value;m.active=document.getElementById('m_active').value;m.taskLock=document.getElementById('m_tasklock').value;
   try{await saveMember(m);closeModal();showToast(name+'さんを保存しました');render();}
   catch(e){showToast('保存に失敗しました: '+(e.message||e));}
 }
