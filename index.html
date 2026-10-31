@@ -511,15 +511,11 @@ function viewPlan(){
   var recent=daysOf(m.email).slice(0,8);
   var taskLocked=m.taskLock==='yes';
   var myTasks=myTasksFor(m);
-  var planInput;
-  if(taskLocked){
-    planInput='<label class="fl">タスク（指定から選ぶ）</label>'+
-      (myTasks.length?'<div id="p_tasks" style="display:flex;flex-direction:column;gap:6px;margin-top:4px">'+myTasks.map(function(t){return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:.9rem"><input type="checkbox" value="'+escapeAttr(t.title)+'" style="width:auto;margin-top:5px"> <span>'+escapeHtml(t.title)+(t.memo?' <span class="hint">'+escapeHtml(t.memo)+'</span>':'')+'</span></label>';}).join('')+'</div>':'<div class="hint">指定タスクがありません。管理者がタスクを割り当てます。</div>')+
-      '<label class="fl" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="p_other_on" style="width:auto" onchange="var o=document.getElementById(\'p_other_wrap\');if(o)o.hidden=!this.checked"> リストにない作業をする（承認が必要）</label>'+
-      '<div id="p_other_wrap" hidden><input type="text" id="p_other_txt" placeholder="その他の作業内容"></div>';
-  }else{
-    planInput='<label class="fl">やること（予定）</label><textarea id="p_plan" rows="4" placeholder="明日やる予定の作業">'+escapeHtml(plan)+'</textarea>';
-  }
+  var otherLabel=taskLocked?'リストにない作業をする（承認が必要）':'その他（自由記入）';
+  var planInput='<label class="fl">やること（予定・タスクから選ぶ）</label>'+
+    (myTasks.length?'<div id="p_tasks" style="display:flex;flex-direction:column;gap:6px;margin-top:4px">'+myTasks.map(function(t){return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:.9rem"><input type="checkbox" value="'+escapeAttr(t.title)+'" style="width:auto;margin-top:5px"> <span>'+escapeHtml(t.title)+(t.memo?' <span class="hint">'+escapeHtml(t.memo)+'</span>':'')+'</span></label>';}).join('')+'</div>':'<div class="hint">選べるタスクがありません。'+(taskLocked?'管理者がタスクを割り当てます。':'下の「その他」に記入してください。')+'</div>')+
+    '<label class="fl" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="p_other_on" style="width:auto" onchange="var o=document.getElementById(\'p_other_wrap\');if(o)o.hidden=!this.checked"> '+otherLabel+'</label>'+
+    '<div id="p_other_wrap" hidden><input type="text" id="p_other_txt" placeholder="その他の作業内容"></div>';
   return '<h2>予定を出す</h2><p class="viewdesc">明日どこへ、どのルートで行き、何をするか。出すと '+escapeHtml(a1n)+(a2n?'（1次）→ '+escapeHtml(a2n)+'（2次）':'')+' の承認へ回ります。承認されてから実行してください。</p>'+
   '<div class="cols split"><div>'+
     '<div class="card"><label class="fl">対象日</label><input type="date" id="p_date" value="'+escapeAttr(date)+'" onchange="planDate=this.value;render()">'+
@@ -565,16 +561,13 @@ async function submitPlan(){
   var taskLocked=m.taskLock==='yes';
   var planText='', offList=false;
   if(kind==='休み'){planText='（休み予定）';}
-  else if(taskLocked){
+  else{
     var checked=[].slice.call(document.querySelectorAll('#p_tasks input:checked')).map(function(c){return c.value;});
     var otherOn=document.getElementById('p_other_on')&&document.getElementById('p_other_on').checked;
     var otherTxt=otherOn?((document.getElementById('p_other_txt')||{}).value||'').trim():'';
-    if(!checked.length&&!otherTxt){showToast('指定タスクを選ぶか、その他を記入してください');return;}
+    if(!checked.length&&!otherTxt){showToast('タスクを選ぶか、その他を記入してください');return;}
     offList=!!otherTxt;
     planText=checked.join('、')+(otherTxt?((checked.length?' / ':'')+'その他: '+otherTxt):'');
-  }else{
-    planText=(document.getElementById('p_plan').value||'').trim();
-    if(!planText){showToast('やること（予定）を入れてください');return;}
   }
   if(kind==='出勤'&&!route){showToast('ルート（どう行くか）を入れてください');return;}
   var ps;
