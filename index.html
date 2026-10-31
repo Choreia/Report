@@ -219,7 +219,7 @@ var currentUser={email:'',name:'',domain:'',photo:''};
 var orgConfig=null;
 var members=[],days=[],comments=[],sheetSettings={},dataLoadError=null;
 var setupDriveId='',setupDriveName='',setupFolderId='',setupFolderName='',setupFolderPath=[];
-var tab='plan', selId=null, planDate=null, ovMonth=null;
+var tab='plan', selId=null, planDate=null, ovMonth=null, teamFilter='';
 
 // ==================== Utility ====================
 function escapeHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -391,7 +391,7 @@ async function removeAdmin(e){if(e===orgConfig.admin){showToast('オーナーは
 // ==================== Tabs & render ====================
 function showMainView(){var sb=document.getElementById('btn-settings');if(sb)sb.style.display=isAdmin()?'':'none';ovMonth=ovMonth||thisMonth();planDate=planDate||tomorrowISO();var allowed=availableTabs().map(function(t){return t.k;});if(allowed.indexOf(tab)===-1)tab=allowed[0];showView('main');render();}
 function availableTabs(){
-  var t=[{k:'plan',label:'予定を出す'},{k:'do',label:'実行報告',badge:myNeedReport()},{k:'mine',label:'自分の履歴'}];
+  var t=[{k:'plan',label:'予定を出す'},{k:'do',label:'実行報告',badge:myNeedReport()},{k:'mine',label:'自分の履歴'},{k:'team',label:'みんなの報告'}];
   if(isApprover())t.push({k:'approve',label:'承認',badge:pendingForMe().length});
   if(isApprover()||isAdmin())t.push({k:'kanri',label:'管理',badge:kanriAlertCount()});
   if(isApprover()||isAdmin())t.push({k:'overview',label:'一覧・集計'});
@@ -404,6 +404,7 @@ function render(){
   if(tab==='plan')h=viewPlan();
   else if(tab==='do')h=viewDo();
   else if(tab==='mine')h=viewMine();
+  else if(tab==='team')h=viewTeam();
   else if(tab==='approve')h=viewApprove();
   else if(tab==='kanri')h=viewKanri();
   else if(tab==='overview')h=viewOverview();
@@ -574,6 +575,21 @@ function viewMine(){
   return '<h2>自分の履歴</h2><p class="viewdesc">予定と実行報告の状況。クリックで中身を確認できます。</p>'+
     (mine.length?'<div class="cols split"><div><div class="rowlist">'+mine.map(function(d){return dayRowHTML(d,'',true);}).join('')+'</div></div><div>'+(selId?detailHTML(byId(days,selId),true):'<div class="detail dash"><div class="emptybox">選ぶと中身が出ます。</div></div>')+'</div></div>'
     :'<div class="emptybox">まだ予定・報告がありません。「予定を出す」から始めてください。</div>');
+}
+
+// ==================== view: team (みんなの報告・読み取り専用) ====================
+function viewTeam(){
+  var active=members.filter(function(m){return m.active!=='no';});
+  var list=days.slice().sort(function(a,b){return a.date<b.date?1:-1;});
+  if(teamFilter)list=list.filter(function(d){return d.email.toLowerCase()===teamFilter.toLowerCase();});
+  list=list.slice(0,80);
+  var opts='<option value="">全員</option>'+active.map(function(m){return '<option value="'+escapeAttr(m.email)+'" '+(m.email===teamFilter?'selected':'')+'>'+escapeHtml(m.name)+'</option>';}).join('');
+  var left='<h2>みんなの報告</h2><p class="viewdesc">チーム全員の予定と実行報告を閲覧できます（読み取り専用）。お互いの動きが見える状態にしておくための画面です。</p>'+
+    '<div class="bar"><label class="fl" style="margin:0">メンバー</label><select style="max-width:220px" onchange="teamFilter=this.value;selId=null;render()">'+opts+'</select></div>'+
+    '<div class="rowlist">'+(list.length?list.map(function(d){return dayRowHTML(d,'',true);}).join(''):'<div class="emptybox">まだ記録がありません。</div>')+'</div>';
+  var sel=selId?byId(days,selId):null;
+  var right=sel?detailHTML(sel,true):'<div class="detail dash"><div class="emptybox">選ぶと中身（読み取り専用）が出ます。</div></div>';
+  return '<div class="cols split"><div>'+left+'</div><div>'+right+'</div></div>';
 }
 
 // ==================== view: approve ====================
