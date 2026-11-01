@@ -148,16 +148,30 @@ footer{max-width:1140px;margin:0 auto;padding:18px 22px;color:var(--muted);font-
 .pk-cards.drop{border-color:var(--accent);background:var(--accent-soft)}
 .pk-card{background:var(--card);border:1px solid var(--line2);border-left:4px solid var(--accent);border-radius:9px;padding:7px 9px;cursor:grab;font-size:.85rem;font-weight:700}
 .pk-card:active{cursor:grabbing}.pk-card.dragging{opacity:.4}
-.pt{border:1px solid var(--line);border-radius:11px;overflow:hidden}
-.pt-row{display:grid;grid-template-columns:46px 1fr;border-bottom:1px solid var(--line);min-height:40px}
-.pt-row:last-child{border-bottom:none}
-.pt-hr{font-family:"IBM Plex Mono",monospace;font-size:.7rem;color:var(--muted);padding:5px 6px;border-right:1px solid var(--line);background:var(--panel);text-align:right}
-.pt-area{padding:4px;display:flex;flex-direction:column;gap:4px}
-.pt-area.drop{background:var(--accent-soft)}
-.pt-block{background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;padding:5px 8px;cursor:grab;display:flex;gap:6px;align-items:flex-start;font-size:.8rem}
-.pt-block:active{cursor:grabbing}.pt-block.dragging{opacity:.4}
-.pt-block .bt{flex:1;min-width:0;font-weight:700;color:var(--accent-deep)}
-.pt-block .x{border:none;background:none;color:var(--accent-deep);cursor:pointer;font-size:.85rem;padding:0 2px;line-height:1}
+.pk-pool{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:16px;border:1px dashed transparent;border-radius:8px;padding:3px}
+.pk-pool.drop{border-color:var(--accent);background:var(--accent-soft)}
+.pk-chip{background:var(--card);border:1px solid var(--line2);border-left:4px solid var(--accent);border-radius:9px;padding:5px 9px;cursor:grab;font-size:.82rem;font-weight:700}
+.pk-chip:active{cursor:grabbing}.pk-chip.dragging{opacity:.4}
+.pk-empty{font-size:.78rem;color:var(--muted);padding:4px 6px}
+.ptl2{display:flex;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--card)}
+.ptl2-gutter{flex:0 0 44px;position:relative}
+.ptl2-gutter .gh{position:absolute;right:6px;font-family:"IBM Plex Mono",monospace;font-size:.68rem;color:var(--muted)}
+.ptl2-lanes{flex:1;display:flex;overflow-x:auto}
+.lane{flex:1 0 128px;min-width:128px;border-left:1px solid var(--line)}
+.lane-h{display:flex;align-items:center;justify-content:center;gap:3px;height:28px;font-size:.76rem;font-weight:800;color:var(--sub);background:var(--panel);border-bottom:1px solid var(--line);padding:0 6px}
+.lane-h .lname{cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:88px}
+.lane-h .lx{border:none;background:none;color:var(--muted);cursor:pointer;font-size:.78rem;line-height:1;padding:0 2px}
+.lane-add{flex:0 0 40px;display:flex;align-items:center;justify-content:center;border-left:1px dashed var(--line2);cursor:pointer;color:var(--accent-deep);font-weight:900;background:var(--panel2)}
+.lane-add:hover{background:var(--accent-soft)}
+.lane-canvas{position:relative;background-image:repeating-linear-gradient(var(--line) 0 1px,transparent 1px 40px)}
+.lane-canvas.drop{background-color:var(--accent-soft)}
+.lblk{position:absolute;left:3px;right:3px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;padding:3px 6px;font-size:.74rem;overflow:hidden;cursor:grab;box-sizing:border-box}
+.lblk:active{cursor:grabbing}.lblk.dragging{opacity:.4}
+.lblk .bt{font-weight:700;color:var(--accent-deep);line-height:1.2;display:block;padding-right:14px}
+.lblk .rg{font-size:.62rem;color:var(--accent-deep);font-family:"IBM Plex Mono",monospace;opacity:.85}
+.lblk .x{position:absolute;top:1px;right:2px;border:none;background:none;color:var(--accent-deep);cursor:pointer;font-size:.75rem;line-height:1;padding:1px}
+.lblk .rsz{position:absolute;left:0;right:0;bottom:0;height:8px;cursor:ns-resize}
+.lblk .rsz:hover{background:rgba(160,82,45,.25)}
 .pcal{width:252px;max-width:100%}
 .pcal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .pcal-head .mlabel{font-weight:800;font-size:.9rem;font-family:"Zen Kaku Gothic New",sans-serif}
@@ -572,7 +586,15 @@ function viewPlan(){
   '<div class="acts"><button class="btn" onclick="submitPlan()">'+(ex?'予定を上書きして再提出':'予定を提出')+'</button></div>'+
   '<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:.92rem">最近の自分</h3>'+(recent.length?'<div class="rowlist">'+recent.map(function(d){return dayRowHTML(d,'',true);}).join('')+'</div>':'<div class="hint">まだありません。</div>')+'</div>';
 }
-function parseSched(s){try{var a=JSON.parse(s||'[]');return Array.isArray(a)?a.map(function(b){return {taskId:String(b.taskId||b.title||''),title:String(b.title||''),hour:parseInt(b.hour,10)||8};}):[];}catch(e){return [];}}
+function loadLanes(){try{var a=JSON.parse(localStorage.getItem('choreia_report_lanes')||'null');if(Array.isArray(a)&&a.length)return a.slice();}catch(e){}return ['自分','エージェント1'];}
+function saveLanes(lanes){try{localStorage.setItem('choreia_report_lanes',JSON.stringify(lanes));}catch(e){}}
+function parseSched(s){
+  try{var o=JSON.parse(s||'null');
+    if(Array.isArray(o))return {lanes:loadLanes(),blocks:o.map(function(b){return {taskId:String(b.taskId||b.title||''),title:String(b.title||''),lane:0,hour:parseInt(b.hour,10)||8,dur:parseInt(b.dur,10)||1};})};
+    if(o&&o.blocks)return {lanes:(o.lanes&&o.lanes.length?o.lanes.slice():loadLanes()),blocks:o.blocks.map(function(b){return {taskId:String(b.taskId||b.title||''),title:String(b.title||''),lane:parseInt(b.lane,10)||0,hour:parseInt(b.hour,10)||8,dur:parseInt(b.dur,10)||1};})};
+  }catch(e){}
+  return {lanes:loadLanes(),blocks:[]};
+}
 function planCalHTML(m){
   var date=planDate||tomorrowISO();
   if(!planCalMonth)planCalMonth=date.slice(0,7);
@@ -584,36 +606,61 @@ function planCalHTML(m){
 }
 function planCalNav(delta){var y=+planCalMonth.slice(0,4),mo=+planCalMonth.slice(5,7)-1+delta;var d=new Date(y,mo,1);planCalMonth=d.getFullYear()+'-'+pad(d.getMonth()+1);render();}
 function planPick(iso){planDate=iso;planSchedDate=null;planCalMonth=iso.slice(0,7);render();}
+var PT_H0=8,PT_H1=20,PT_RH=40;
 function pkHTML(m){
-  var placed={};planSched.forEach(function(b){placed[b.taskId]=true;});
+  var H0=PT_H0,H1=PT_H1,RH=PT_RH,nH=H1-H0+1;
+  var placed={};planSched.blocks.forEach(function(b){placed[b.taskId]=true;});
   var avail=myTasksFor(m).filter(function(t){return !placed[t.id];});
-  var kan='<div class="pk-col"><div class="pk-h">タスク</div><div class="pk-cards" id="pk-cards">'+(avail.length?avail.map(function(t){return '<div class="pk-card" draggable="true" data-id="'+escapeAttr(t.id)+'" data-title="'+escapeAttr(t.title)+'">'+escapeHtml(t.title)+'</div>';}).join(''):'<div class="hint">選べるタスクがありません'+(orgConfig&&orgConfig.trackSheetId?'（Trackで追加）':'（「タスク」タブで追加）')+'</div>')+'</div></div>';
-  var tl='';for(var h=8;h<=20;h++){var hh=(h<10?'0':'')+h;var bl=planSched.filter(function(b){return b.hour===h;});tl+='<div class="pt-row"><div class="pt-hr">'+hh+':00</div><div class="pt-area" data-hour="'+h+'">'+bl.map(function(b){return '<div class="pt-block" draggable="true" data-id="'+escapeAttr(b.taskId)+'"><span class="bt">'+escapeHtml(b.title)+'</span><button class="x" title="外す" onclick="planUnblock(\''+escapeAttr(b.taskId)+'\')">✕</button></div>';}).join('')+'</div></div>';}
-  return '<div class="pk-wrap">'+kan+'<div class="pt">'+tl+'</div></div>';
+  var pool='<div class="pk-pool" id="pk-pool">'+(avail.length?avail.map(function(t){return '<div class="pk-chip" draggable="true" data-id="'+escapeAttr(t.id)+'" data-title="'+escapeAttr(t.title)+'">'+escapeHtml(t.title)+'</div>';}).join(''):'<div class="pk-empty">選べるタスクがありません'+(orgConfig&&orgConfig.trackSheetId?'（Trackで追加）':'（「タスク」タブで追加）')+'</div>')+'</div>';
+  var gh='';for(var h=H0;h<=H1;h++){gh+='<div class="gh" style="top:'+(28+(h-H0)*RH-5)+'px">'+(h<10?'0':'')+h+':00</div>';}
+  var gutter='<div class="ptl2-gutter" style="height:'+(28+nH*RH)+'px">'+gh+'</div>';
+  var lanesHtml='';
+  planSched.lanes.forEach(function(ln,li){
+    var blks=planSched.blocks.filter(function(b){return b.lane===li;}).map(function(b){var dur=b.dur||1;var top=(b.hour-H0)*RH+1;var ht=dur*RH-3;var end=b.hour+dur;return '<div class="lblk" draggable="true" data-id="'+escapeAttr(b.taskId)+'" style="top:'+top+'px;height:'+ht+'px"><button class="x" title="外す" onclick="planUnblock(\''+escapeAttr(b.taskId)+'\')">✕</button><span class="bt">'+escapeHtml(b.title)+'</span><span class="rg">'+(b.hour<10?'0':'')+b.hour+':00–'+(end<10?'0':'')+end+':00</span><div class="rsz" data-id="'+escapeAttr(b.taskId)+'"></div></div>';}).join('');
+    var head='<div class="lane-h"><span class="lname" title="名前を変更" onclick="renameLane('+li+')">'+escapeHtml(ln)+'</span>'+(li>0?'<button class="lx" title="このレーンを削除" onclick="removeLane('+li+')">✕</button>':'')+'</div>';
+    lanesHtml+='<div class="lane">'+head+'<div class="lane-canvas" data-lane="'+li+'" style="height:'+(nH*RH)+'px">'+blks+'</div></div>';
+  });
+  var addBtn='<div class="lane-add" title="AIエージェントを追加" onclick="addLane()">＋</div>';
+  return pool+'<div class="ptl2">'+gutter+'<div class="ptl2-lanes">'+lanesHtml+addBtn+'</div></div>';
 }
 function rerenderPk(){var m=myMember();var el=document.getElementById('p_pk');if(el&&m){el.innerHTML=pkHTML(m);wirePlanDnD();}}
-function planUnblock(taskId){planSched=planSched.filter(function(b){return b.taskId!==taskId;});rerenderPk();}
+function planUnblock(taskId){planSched.blocks=planSched.blocks.filter(function(b){return b.taskId!==taskId;});rerenderPk();}
+function addLane(){planSched.lanes.push('エージェント'+planSched.lanes.length);saveLanes(planSched.lanes);rerenderPk();}
+function removeLane(li){if(li<=0)return;planSched.blocks=planSched.blocks.filter(function(b){return b.lane!==li;});planSched.blocks.forEach(function(b){if(b.lane>li)b.lane--;});planSched.lanes.splice(li,1);saveLanes(planSched.lanes);rerenderPk();}
+function renameLane(li){var v=prompt('レーン名',planSched.lanes[li]||'');if(v===null)return;v=v.trim();if(!v)return;planSched.lanes[li]=v;saveLanes(planSched.lanes);rerenderPk();}
 function wirePlanDnD(){
-  document.querySelectorAll('#pk-cards .pk-card').forEach(function(el){
+  var H0=PT_H0,H1=PT_H1,RH=PT_RH;
+  document.querySelectorAll('#pk-pool .pk-chip').forEach(function(el){
     el.addEventListener('dragstart',function(e){planDragId=el.dataset.id;planDragTitle=el.dataset.title;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',el.dataset.id)}catch(x){}});
     el.addEventListener('dragend',function(){el.classList.remove('dragging')});
   });
-  document.querySelectorAll('#p_pk .pt-block').forEach(function(el){
+  document.querySelectorAll('#p_pk .lblk').forEach(function(el){
     el.addEventListener('dragstart',function(e){planDragId=el.dataset.id;planDragTitle=null;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',el.dataset.id)}catch(x){}});
     el.addEventListener('dragend',function(){el.classList.remove('dragging')});
   });
-  document.querySelectorAll('#p_pk .pt-area').forEach(function(el){
+  document.querySelectorAll('#p_pk .lane-canvas').forEach(function(el){
     el.addEventListener('dragover',function(e){e.preventDefault();el.classList.add('drop')});
     el.addEventListener('dragleave',function(){el.classList.remove('drop')});
-    el.addEventListener('drop',function(e){e.preventDefault();el.classList.remove('drop');var hour=parseInt(el.dataset.hour,10);var id=planDragId;if(!id)return;
-      var b=planSched.filter(function(x){return x.taskId===id})[0];
-      if(b){b.hour=hour;}
-      else{var title=planDragTitle;if(!title){var mm=myMember();var mt=(mm?myTasksFor(mm):[]).filter(function(t){return t.id===id})[0];title=mt?mt.title:id;}planSched.push({taskId:id,title:title,hour:hour});}
+    el.addEventListener('drop',function(e){e.preventDefault();el.classList.remove('drop');var id=planDragId;if(!id)return;
+      var lane=parseInt(el.dataset.lane,10)||0;var r=el.getBoundingClientRect();var hour=H0+Math.floor((e.clientY-r.top)/RH);if(hour<H0)hour=H0;if(hour>H1)hour=H1;
+      var b=planSched.blocks.filter(function(x){return x.taskId===id})[0];
+      if(b){b.lane=lane;b.hour=hour;}
+      else{var title=planDragTitle;if(!title){var mm=myMember();var mt=(mm?myTasksFor(mm):[]).filter(function(t){return t.id===id})[0];title=mt?mt.title:id;}planSched.blocks.push({taskId:id,title:title,lane:lane,hour:hour,dur:1});}
       planDragId=null;planDragTitle=null;rerenderPk();
     });
   });
-  var kc=document.getElementById('pk-cards');
-  if(kc){kc.addEventListener('dragover',function(e){e.preventDefault();kc.classList.add('drop')});kc.addEventListener('dragleave',function(){kc.classList.remove('drop')});kc.addEventListener('drop',function(e){e.preventDefault();kc.classList.remove('drop');if(planDragId){planSched=planSched.filter(function(x){return x.taskId!==planDragId});planDragId=null;rerenderPk();}});}
+  document.querySelectorAll('#p_pk .lblk .rsz').forEach(function(h){
+    h.addEventListener('mousedown',function(e){
+      e.preventDefault();e.stopPropagation();
+      var id=h.dataset.id;var b=planSched.blocks.filter(function(x){return x.taskId===id})[0];if(!b)return;
+      var el=h.parentNode;var cr=el.parentNode.getBoundingClientRect();var startHour=b.hour;var pend=b.dur||1;
+      function mm(ev){var dur=Math.round((ev.clientY-(cr.top+(startHour-H0)*RH))/RH);if(dur<1)dur=1;if(startHour+dur>H1+1)dur=H1+1-startHour;pend=dur;el.style.height=(dur*RH-3)+'px';}
+      function mu(){document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);b.dur=pend;rerenderPk();}
+      document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);
+    });
+  });
+  var pool=document.getElementById('pk-pool');
+  if(pool){pool.addEventListener('dragover',function(e){e.preventDefault();pool.classList.add('drop')});pool.addEventListener('dragleave',function(){pool.classList.remove('drop')});pool.addEventListener('drop',function(e){e.preventDefault();pool.classList.remove('drop');if(planDragId){planSched.blocks=planSched.blocks.filter(function(x){return x.taskId!==planDragId});planDragId=null;rerenderPk();}});}
 }
 function mapsDirUrl(route,dest){
   var o='',d=(dest||'').trim();
@@ -648,10 +695,10 @@ async function submitPlan(){
     var de=document.getElementById('p_dest'),rt=document.getElementById('p_route');
     dest=de?de.value.trim():'';route=rt?rt.value.trim():'';
     if(!route){showToast('ルート（どう行くか）を入れてください');return;}
-    if(!planSched.length){showToast('タスクを時間帯にドラッグしてください');return;}
-    var sorted=planSched.slice().sort(function(a,b){return a.hour-b.hour;});
-    planText=sorted.map(function(b){return (b.hour<10?'0':'')+b.hour+':00 '+b.title;}).join(' / ');
-    schedJson=JSON.stringify(sorted);
+    if(!planSched.blocks.length){showToast('タスクを時間帯にドラッグしてください');return;}
+    var sorted=planSched.blocks.slice().sort(function(a,b){return (a.lane-b.lane)||(a.hour-b.hour);});
+    planText=sorted.map(function(b){var ln=planSched.lanes[b.lane]||'自分';var end=b.hour+(b.dur||1);return ln+' '+(b.hour<10?'0':'')+b.hour+':00–'+(end<10?'0':'')+end+':00 '+b.title;}).join(' / ');
+    schedJson=JSON.stringify({lanes:planSched.lanes,blocks:sorted});
   }
   var ps=(kind==='休み')?startStatus(m):(taskLocked?'ok':startStatus(m));
   var ex=dayByEmailDate(m.email,date);
