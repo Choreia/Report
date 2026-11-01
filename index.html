@@ -583,7 +583,7 @@ function viewPlan(){
   '<div class="card" id="p_bus"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">バス</h3><label class="fl">行き先</label><input type="text" id="p_dest" value="'+escapeAttr(dest)+'" placeholder="例：カスミ ○○店 / 社内 / 在宅"><label class="fl">ルート（どう行くか）</label><input type="text" id="p_route" value="'+escapeAttr(route)+'" placeholder="例：榛原→細江"><div style="margin-top:7px"><button type="button" class="btn ghost small" onclick="openMapsFromPlan()">🗺 Googleマップでルートを開く</button></div></div>'+
   '<div class="card" id="p_sched"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">やること（明日の時間割）<span class="hint" style="font-weight:400;margin-left:6px">タスクを時間帯へドラッグ</span></h3><div id="p_pk">'+pkHTML(m)+'</div></div>'+
   '<div class="note"><b>あなたの承認者</b>　1次：'+escapeHtml(a1n)+(a2n?'／2次：'+escapeHtml(a2n):'')+'</div>'+
-  '<div class="acts"><button class="btn" onclick="submitPlan()">'+(ex?'予定を上書きして再提出':'予定を提出')+'</button></div>'+
+  '<div class="acts"><button class="btn ghost" onclick="submitPlan(true)">一時保存</button><button class="btn" onclick="submitPlan(false)">'+((ex&&ex.planStatus)?'上書きして提出':'提出する')+'</button></div>'+
   '<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:.92rem">最近の自分</h3>'+(recent.length?'<div class="rowlist">'+recent.map(function(d){return dayRowHTML(d,'',true);}).join('')+'</div>':'<div class="hint">まだありません。</div>')+'</div>';
 }
 function loadLanes(){try{var a=JSON.parse(localStorage.getItem('choreia_report_lanes')||'null');if(Array.isArray(a)&&a.length)return a.slice();}catch(e){}return ['自分','エージェント1'];}
@@ -695,7 +695,7 @@ function wirePlanForm(){
   seg.querySelectorAll('button').forEach(function(b){b.onclick=function(){seg.querySelectorAll('button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');sync();};});
   sync();wirePlanDnD();
 }
-async function submitPlan(){
+async function submitPlan(asDraft){
   var m=myMember();if(!m){showToast('メンバー登録がありません');return;}
   var date=planDate||tomorrowISO();
   var kind=(document.querySelector('#p_kind button.on')||{dataset:{v:'出勤'}}).dataset.v;
@@ -705,21 +705,21 @@ async function submitPlan(){
   else{
     var de=document.getElementById('p_dest'),rt=document.getElementById('p_route');
     dest=de?de.value.trim():'';route=rt?rt.value.trim():'';
-    if(!route){showToast('ルート（どう行くか）を入れてください');return;}
-    if(!planSched.blocks.length){showToast('タスクを時間帯にドラッグしてください');return;}
+    if(!asDraft&&!route){showToast('ルート（どう行くか）を入れてください');return;}
+    if(!asDraft&&!planSched.blocks.length){showToast('タスクを時間帯にドラッグしてください');return;}
     var sorted=planSched.blocks.slice().sort(function(a,b){return (a.lane-b.lane)||(a.start-b.start);});
     planText=sorted.map(function(b){var ln=planSched.lanes[b.lane]||'自分';return ln+' '+fmtMin(b.start)+'–'+fmtMin(b.start+b.dur)+' '+b.title;}).join(' / ');
     schedJson=JSON.stringify({lanes:planSched.lanes,blocks:sorted});
   }
-  var ps=(kind==='休み')?startStatus(m):(taskLocked?'ok':startStatus(m));
+  var ps=asDraft?'':((kind==='休み')?startStatus(m):(taskLocked?'ok':startStatus(m)));
   var ex=dayByEmailDate(m.email,date);
   var obj=ex?Object.assign({},ex):{id:nextId('D',days),email:m.email,name:m.name,date:date,attend:'',inT:'',outT:'',actRoute:'',done:'',busDiff:'',repStatus:'',r1By:'',r1At:'',r1Act:'',r2By:'',r2At:'',r2Act:''};
   Object.assign(obj,{planKind:kind,dest:dest,route:route,plan:planText,sched:schedJson,planStatus:ps,p1By:'',p1At:'',p1Act:'',p2By:'',p2At:'',p2Act:''});
-  var btn=document.querySelector('.acts .btn');if(btn){btn.disabled=true;btn.textContent='提出中…';}
+  var btns=document.querySelectorAll('.acts .btn');btns.forEach(function(b){b.disabled=true;});
   try{await saveDay(obj);
-    var msg=(ps==='ok')?(taskLocked?'予定を登録しました（指定タスクのみ・承認不要）':'予定を保存しました（承認者未設定のため承認済）'):('予定を提出しました → '+nameOf(m.a1||m.a2)+'さんへ');
-    showToast(msg);planSchedDate=null;render();syncMyCalendar();}
-  catch(e){showToast('提出に失敗しました: '+(e.message||e));if(btn)btn.disabled=false;}
+    var msg=asDraft?'一時保存しました（未提出）':((ps==='ok')?(taskLocked?'予定を登録しました（指定タスクのみ・承認不要）':'予定を保存しました（承認者未設定のため承認済）'):('予定を提出しました → '+nameOf(m.a1||m.a2)+'さんへ'));
+    showToast(msg);planSchedDate=null;render();if(!asDraft)syncMyCalendar();}
+  catch(e){showToast((asDraft?'一時保存':'提出')+'に失敗しました: '+(e.message||e));btns.forEach(function(b){b.disabled=false;});}
 }
 
 // ==================== view: DO (実行報告) ====================
@@ -777,7 +777,7 @@ function viewMine(){
 // ==================== view: team (みんなの報告・読み取り専用) ====================
 function viewTeam(){
   var active=members.filter(function(m){return m.active!=='no';});
-  var list=days.slice().sort(function(a,b){return a.date<b.date?1:-1;});
+  var list=days.filter(function(d){return d.planStatus!==''||d.repStatus!=='';}).sort(function(a,b){return a.date<b.date?1:-1;});
   if(teamFilter)list=list.filter(function(d){return d.email.toLowerCase()===teamFilter.toLowerCase();});
   list=list.slice(0,80);
   var opts='<option value="">全員</option>'+active.map(function(m){return '<option value="'+escapeAttr(m.email)+'" '+(m.email===teamFilter?'selected':'')+'>'+escapeHtml(m.name)+'</option>';}).join('');
@@ -934,6 +934,7 @@ function viewOverview(){
   function cell(email,day){
     var iso=mth+'-'+pad(day);var d=dayByEmailDate(email,iso);
     if(!d)return (iso<=todayISO()&&!isWeekend(iso))?'<span class="g-miss" title="未提出">未</span>':'<span style="color:var(--line2)">·</span>';
+    if(d.planStatus===''&&d.repStatus==='')return (iso<=todayISO()&&!isWeekend(iso))?'<span class="g-miss" title="下書き・未提出">未</span>':'<span style="color:var(--line2)">·</span>';
     if(d.planKind==='休み'||d.attend==='休み'||d.attend==='突発休み')return '<span class="g-off">休</span>';
     var s=dayState(d);
     if(s==='done')return '<span class="g-done" title="完了">'+(d.busDiff==='1'?'済*':'済')+'</span>';
