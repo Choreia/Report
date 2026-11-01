@@ -158,6 +158,19 @@ footer{max-width:1140px;margin:0 auto;padding:18px 22px;color:var(--muted);font-
 .pt-block:active{cursor:grabbing}.pt-block.dragging{opacity:.4}
 .pt-block .bt{flex:1;min-width:0;font-weight:700;color:var(--accent-deep)}
 .pt-block .x{border:none;background:none;color:var(--accent-deep);cursor:pointer;font-size:.85rem;padding:0 2px;line-height:1}
+.pcal{width:252px;max-width:100%}
+.pcal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.pcal-head .mlabel{font-weight:800;font-size:.9rem;font-family:"Zen Kaku Gothic New",sans-serif}
+.pcal-nav{border:1px solid var(--line2);background:var(--panel);border-radius:7px;cursor:pointer;font-family:inherit;font-weight:700;padding:2px 10px;color:var(--accent-deep)}
+.pcal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.pcal-wd{text-align:center;font-size:.66rem;color:var(--muted);font-weight:700;padding:2px 0}
+.pcal-d{position:relative;text-align:center;font-size:.8rem;padding:6px 0;border-radius:8px;cursor:pointer;border:1.5px solid transparent;font-variant-numeric:tabular-nums}
+.pcal-d:hover{background:var(--panel)}
+.pcal-d.other{visibility:hidden;cursor:default}
+.pcal-d.sel{background:var(--accent);color:#fff;font-weight:800}
+.pcal-d.today{border-color:var(--accent)}
+.pcal-d .dot{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--ok)}
+.pcal-d.sel .dot{background:#fff}
 </style>
 </head>
 <body>
@@ -241,7 +254,7 @@ var orgConfig=null;
 var members=[],days=[],comments=[],tasks=[],sheetSettings={},dataLoadError=null,trackLinkErr=null;
 var setupDriveId='',setupDriveName='',setupFolderId='',setupFolderName='',setupFolderPath=[];
 var tab='plan', selId=null, planDate=null, ovMonth=null, teamFilter='';
-var planSched=[], planSchedDate=null, planDragId=null, planDragTitle=null;
+var planSched=[], planSchedDate=null, planDragId=null, planDragTitle=null, planCalMonth=null;
 
 // ==================== Utility ====================
 function escapeHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -551,8 +564,8 @@ function viewPlan(){
   var off=(kind==='休み');
   return '<h2>予定を出す <span class="mono" style="color:var(--muted);font-size:.9rem">'+fmtDate(date)+'</span></h2>'+
   '<p class="viewdesc">明日の時間割を組みます。左のタスクを右の時間帯にドラッグして差し込み、提出すると '+escapeHtml(a1n)+(a2n?'（1次）→ '+escapeHtml(a2n)+'（2次）':'')+' の承認へ回ります。</p>'+
-  '<div class="card"><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><label class="fl">対象日</label><input type="date" id="p_date" value="'+escapeAttr(date)+'" onchange="planDate=this.value;planSchedDate=null;render()"></div><div><label class="fl">区分</label><div class="seg" id="p_kind">'+PLAN_KINDS.map(function(k){return '<button class="'+(k===kind?'on':'')+'" data-v="'+k+'">'+k+'</button>';}).join('')+'</div></div></div>'+
-    (ex?'<div style="margin-top:8px">現在の状態：'+phaseBadge(ex.planStatus)+(locked?' <span class="hint">上書きすると、もう一度1次から承認されます。</span>':'')+'</div>':'')+'</div>'+
+  '<div class="card"><div style="display:flex;gap:18px;flex-wrap:wrap"><div><label class="fl">対象日</label>'+planCalHTML(m)+'</div><div style="flex:1;min-width:160px"><label class="fl">区分</label><div class="seg" id="p_kind">'+PLAN_KINDS.map(function(k){return '<button class="'+(k===kind?'on':'')+'" data-v="'+k+'">'+k+'</button>';}).join('')+'</div>'+
+    (ex?'<div style="margin-top:10px">現在の状態：'+phaseBadge(ex.planStatus)+(locked?'<br><span class="hint">上書きすると、もう一度1次から承認されます。</span>':'')+'</div>':'')+'</div></div></div>'+
   '<div class="card" id="p_bus"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">バス</h3><label class="fl">行き先</label><input type="text" id="p_dest" value="'+escapeAttr(dest)+'" placeholder="例：カスミ ○○店 / 社内 / 在宅"><label class="fl">ルート（どう行くか）</label><input type="text" id="p_route" value="'+escapeAttr(route)+'" placeholder="例：榛原→細江"><div style="margin-top:7px"><button type="button" class="btn ghost small" onclick="openMapsFromPlan()">🗺 Googleマップでルートを開く</button></div></div>'+
   '<div class="card" id="p_sched"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">やること（明日の時間割）<span class="hint" style="font-weight:400;margin-left:6px">タスクを時間帯へドラッグ</span></h3><div id="p_pk">'+pkHTML(m)+'</div></div>'+
   '<div class="note"><b>あなたの承認者</b>　1次：'+escapeHtml(a1n)+(a2n?'／2次：'+escapeHtml(a2n):'')+'</div>'+
@@ -560,6 +573,17 @@ function viewPlan(){
   '<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:.92rem">最近の自分</h3>'+(recent.length?'<div class="rowlist">'+recent.map(function(d){return dayRowHTML(d,'',true);}).join('')+'</div>':'<div class="hint">まだありません。</div>')+'</div>';
 }
 function parseSched(s){try{var a=JSON.parse(s||'[]');return Array.isArray(a)?a.map(function(b){return {taskId:String(b.taskId||b.title||''),title:String(b.title||''),hour:parseInt(b.hour,10)||8};}):[];}catch(e){return [];}}
+function planCalHTML(m){
+  var date=planDate||tomorrowISO();
+  if(!planCalMonth)planCalMonth=date.slice(0,7);
+  var y=+planCalMonth.slice(0,4),mo=+planCalMonth.slice(5,7);
+  var startDow=new Date(y,mo-1,1).getDay(),ndays=new Date(y,mo,0).getDate(),today=todayISO();
+  var cells='';for(var i=0;i<startDow;i++)cells+='<div class="pcal-d other"></div>';
+  for(var d=1;d<=ndays;d++){var iso=planCalMonth+'-'+pad(d);var has=dayByEmailDate(m.email,iso);cells+='<div class="pcal-d'+(iso===date?' sel':'')+(iso===today?' today':'')+'" onclick="planPick(\''+iso+'\')">'+d+(has?'<span class="dot" title="予定あり"></span>':'')+'</div>';}
+  return '<div class="pcal"><div class="pcal-head"><button class="pcal-nav" onclick="planCalNav(-1)">‹</button><span class="mlabel">'+y+'年'+mo+'月</span><button class="pcal-nav" onclick="planCalNav(1)">›</button></div><div class="pcal-grid">'+['日','月','火','水','木','金','土'].map(function(w){return '<div class="pcal-wd">'+w+'</div>';}).join('')+cells+'</div></div>';
+}
+function planCalNav(delta){var y=+planCalMonth.slice(0,4),mo=+planCalMonth.slice(5,7)-1+delta;var d=new Date(y,mo,1);planCalMonth=d.getFullYear()+'-'+pad(d.getMonth()+1);render();}
+function planPick(iso){planDate=iso;planSchedDate=null;planCalMonth=iso.slice(0,7);render();}
 function pkHTML(m){
   var placed={};planSched.forEach(function(b){placed[b.taskId]=true;});
   var avail=myTasksFor(m).filter(function(t){return !placed[t.id];});
@@ -615,7 +639,7 @@ function wirePlanForm(){
 }
 async function submitPlan(){
   var m=myMember();if(!m){showToast('メンバー登録がありません');return;}
-  var date=document.getElementById('p_date').value;if(!date){showToast('対象日を選んでください');return;}
+  var date=planDate||tomorrowISO();
   var kind=(document.querySelector('#p_kind button.on')||{dataset:{v:'出勤'}}).dataset.v;
   var taskLocked=m.taskLock==='yes';
   var dest='',route='',planText='',schedJson='[]';
