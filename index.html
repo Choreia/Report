@@ -140,6 +140,24 @@ footer{max-width:1140px;margin:0 auto;padding:18px 22px;color:var(--muted);font-
 .cfgrow:last-child{border-bottom:none}
 .cfghdr{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:10px;font-size:.75rem;font-weight:800;color:var(--muted);padding-bottom:6px;border-bottom:1.5px solid var(--line2)}
 @media(max-width:620px){.cfgrow,.cfghdr{grid-template-columns:1fr 1fr}}
+.pk-wrap{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:720px){.pk-wrap{grid-template-columns:1fr 300px}}
+.pk-col{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:9px;min-height:60px}
+.pk-h{font-size:.76rem;font-weight:800;color:var(--sub);margin-bottom:6px}
+.pk-cards{display:flex;flex-direction:column;gap:6px;min-height:12px;border:1px dashed transparent;border-radius:8px}
+.pk-cards.drop{border-color:var(--accent);background:var(--accent-soft)}
+.pk-card{background:var(--card);border:1px solid var(--line2);border-left:4px solid var(--accent);border-radius:9px;padding:7px 9px;cursor:grab;font-size:.85rem;font-weight:700}
+.pk-card:active{cursor:grabbing}.pk-card.dragging{opacity:.4}
+.pt{border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.pt-row{display:grid;grid-template-columns:46px 1fr;border-bottom:1px solid var(--line);min-height:40px}
+.pt-row:last-child{border-bottom:none}
+.pt-hr{font-family:"IBM Plex Mono",monospace;font-size:.7rem;color:var(--muted);padding:5px 6px;border-right:1px solid var(--line);background:var(--panel);text-align:right}
+.pt-area{padding:4px;display:flex;flex-direction:column;gap:4px}
+.pt-area.drop{background:var(--accent-soft)}
+.pt-block{background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;padding:5px 8px;cursor:grab;display:flex;gap:6px;align-items:flex-start;font-size:.8rem}
+.pt-block:active{cursor:grabbing}.pt-block.dragging{opacity:.4}
+.pt-block .bt{flex:1;min-width:0;font-weight:700;color:var(--accent-deep)}
+.pt-block .x{border:none;background:none;color:var(--accent-deep);cursor:pointer;font-size:.85rem;padding:0 2px;line-height:1}
 </style>
 </head>
 <body>
@@ -203,12 +221,12 @@ var TASK_FIELDS=['id','title','assignee','active','memo','updatedAt'];
 var DAY_FIELDS=['id','email','name','date',
   'planKind','dest','route','plan','planStatus','p1By','p1At','p1Act','p2By','p2At','p2Act',
   'attend','inT','outT','actRoute','done','busDiff','repStatus','r1By','r1At','r1Act','r2By','r2At','r2Act',
-  'calEventId','updatedAt'];
+  'sched','calEventId','updatedAt'];
 var COMMENT_FIELDS=['id','dayId','phase','by','byName','at','text'];
 var SETTING_FIELDS=['key','value'];
 var SHEET_DEFS=[
   {title:'メンバー',fields:MEMBER_FIELDS,headers:['ID','氏名','氏名(英)','所属','メール','申請ルート','1次承認者','2次承認者','在籍','タスク限定','メモ','更新日']},
-  {title:'日次',fields:DAY_FIELDS,headers:['ID','メール','氏名','対象日','予定区分','行き先','予定ルート','やること','計画状態','計画1次者','計画1次時刻','計画1次処理','計画2次者','計画2次時刻','計画2次処理','勤怠','出社','退社','実ルート','実行内容','ルート外','報告状態','報告1次者','報告1次時刻','報告1次処理','報告2次者','報告2次時刻','報告2次処理','予定イベントID','更新日']},
+  {title:'日次',fields:DAY_FIELDS,headers:['ID','メール','氏名','対象日','予定区分','行き先','予定ルート','やること','計画状態','計画1次者','計画1次時刻','計画1次処理','計画2次者','計画2次時刻','計画2次処理','勤怠','出社','退社','実ルート','実行内容','ルート外','報告状態','報告1次者','報告1次時刻','報告1次処理','報告2次者','報告2次時刻','報告2次処理','時間割データ','予定イベントID','更新日']},
   {title:'やりとり',fields:COMMENT_FIELDS,headers:['ID','日次ID','フェーズ','送信者メール','送信者','時刻','本文']},
   {title:'設定',fields:SETTING_FIELDS,headers:['キー','値']},
   {title:'タスク',fields:TASK_FIELDS,headers:['ID','タスク','割当','有効','メモ','更新日']}
@@ -223,6 +241,7 @@ var orgConfig=null;
 var members=[],days=[],comments=[],tasks=[],sheetSettings={},dataLoadError=null,trackLinkErr=null;
 var setupDriveId='',setupDriveName='',setupFolderId='',setupFolderName='',setupFolderPath=[];
 var tab='plan', selId=null, planDate=null, ovMonth=null, teamFilter='';
+var planSched=[], planSchedDate=null, planDragId=null, planDragTitle=null;
 
 // ==================== Utility ====================
 function escapeHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -528,27 +547,49 @@ function viewPlan(){
   var a1n=m.a1?nameOf(m.a1):'（なし）', a2n=m.a2?nameOf(m.a2):'';
   var locked=ex&&(ex.planStatus==='wait1'||ex.planStatus==='wait2'||ex.planStatus==='ok');
   var recent=daysOf(m.email).slice(0,8);
-  var taskLocked=m.taskLock==='yes';
-  var myTasks=myTasksFor(m);
-  var otherLabel=taskLocked?'リストにない作業をする（承認が必要）':'その他（自由記入）';
-  var planInput='<label class="fl">やること（予定・タスクから選ぶ）</label>'+
-    (myTasks.length?'<div id="p_tasks" style="display:flex;flex-direction:column;gap:6px;margin-top:4px">'+myTasks.map(function(t){return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:.9rem"><input type="checkbox" value="'+escapeAttr(t.title)+'" style="width:auto;margin-top:5px"> <span>'+escapeHtml(t.title)+(t.memo?' <span class="hint">'+escapeHtml(t.memo)+'</span>':'')+'</span></label>';}).join('')+'</div>':'<div class="hint">選べるタスクがありません。'+(taskLocked?'管理者がタスクを割り当てます。':'下の「その他」に記入してください。')+'</div>')+
-    '<label class="fl" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="p_other_on" style="width:auto" onchange="var o=document.getElementById(\'p_other_wrap\');if(o)o.hidden=!this.checked"> '+otherLabel+'</label>'+
-    '<div id="p_other_wrap" hidden><input type="text" id="p_other_txt" placeholder="その他の作業内容"></div>';
-  return '<h2>予定を出す</h2><p class="viewdesc">明日どこへ、どのルートで行き、何をするか。出すと '+escapeHtml(a1n)+(a2n?'（1次）→ '+escapeHtml(a2n)+'（2次）':'')+' の承認へ回ります。承認されてから実行してください。</p>'+
-  '<div class="cols split"><div>'+
-    '<div class="card"><label class="fl">対象日</label><input type="date" id="p_date" value="'+escapeAttr(date)+'" onchange="planDate=this.value;render()">'+
-      (ex?'<div style="margin-top:8px">現在の状態：'+phaseBadge(ex.planStatus)+(locked?' <span class="hint">上書きすると、もう一度1次から承認されます。</span>':'')+'</div>':'')+
-      '<label class="fl">区分</label><div class="seg" id="p_kind">'+PLAN_KINDS.map(function(k){return '<button class="'+(k===kind?'on':'')+'" data-v="'+k+'">'+k+'</button>';}).join('')+'</div></div>'+
-    '<div class="card" id="p_workfields"><label class="fl">行き先</label><input type="text" id="p_dest" value="'+escapeAttr(dest)+'" placeholder="例：カスミ ○○店 / 社内 / 在宅">'+
-      '<label class="fl">ルート（どう行くか）</label><input type="text" id="p_route" value="'+escapeAttr(route)+'" placeholder="例：榛原→細江">'+
-      '<div style="margin-top:7px"><button type="button" class="btn ghost small" onclick="openMapsFromPlan()">🗺 Googleマップでルートを開く</button></div>'+
-      planInput+'</div>'+
-    '<div class="acts"><button class="btn" onclick="submitPlan()">'+(ex?'予定を上書きして再提出':'予定を提出')+'</button></div>'+
-  '</div><div>'+
-    '<div class="note"><b>あなたの承認者</b><br>1次：'+escapeHtml(a1n)+(a2n?'<br>2次：'+escapeHtml(a2n):'')+'<br><span style="color:var(--muted)">承認者は管理者が「メンバー」で設定します。</span></div>'+
-    '<div class="card"><h3 style="margin:0 0 8px;font-size:.92rem">最近の自分</h3>'+(recent.length?'<div class="rowlist">'+recent.map(function(d){return dayRowHTML(d,'',true);}).join('')+'</div>':'<div class="hint">まだありません。</div>')+'</div>'+
-  '</div></div>';
+  if(planSchedDate!==date){planSched=parseSched(ex&&ex.sched);planSchedDate=date;}
+  var off=(kind==='休み');
+  return '<h2>予定を出す <span class="mono" style="color:var(--muted);font-size:.9rem">'+fmtDate(date)+'</span></h2>'+
+  '<p class="viewdesc">明日の時間割を組みます。左のタスクを右の時間帯にドラッグして差し込み、提出すると '+escapeHtml(a1n)+(a2n?'（1次）→ '+escapeHtml(a2n)+'（2次）':'')+' の承認へ回ります。</p>'+
+  '<div class="card"><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><label class="fl">対象日</label><input type="date" id="p_date" value="'+escapeAttr(date)+'" onchange="planDate=this.value;planSchedDate=null;render()"></div><div><label class="fl">区分</label><div class="seg" id="p_kind">'+PLAN_KINDS.map(function(k){return '<button class="'+(k===kind?'on':'')+'" data-v="'+k+'">'+k+'</button>';}).join('')+'</div></div></div>'+
+    (ex?'<div style="margin-top:8px">現在の状態：'+phaseBadge(ex.planStatus)+(locked?' <span class="hint">上書きすると、もう一度1次から承認されます。</span>':'')+'</div>':'')+'</div>'+
+  '<div class="card" id="p_bus"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">バス</h3><label class="fl">行き先</label><input type="text" id="p_dest" value="'+escapeAttr(dest)+'" placeholder="例：カスミ ○○店 / 社内 / 在宅"><label class="fl">ルート（どう行くか）</label><input type="text" id="p_route" value="'+escapeAttr(route)+'" placeholder="例：榛原→細江"><div style="margin-top:7px"><button type="button" class="btn ghost small" onclick="openMapsFromPlan()">🗺 Googleマップでルートを開く</button></div></div>'+
+  '<div class="card" id="p_sched"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">やること（明日の時間割）<span class="hint" style="font-weight:400;margin-left:6px">タスクを時間帯へドラッグ</span></h3><div id="p_pk">'+pkHTML(m)+'</div></div>'+
+  '<div class="note"><b>あなたの承認者</b>　1次：'+escapeHtml(a1n)+(a2n?'／2次：'+escapeHtml(a2n):'')+'</div>'+
+  '<div class="acts"><button class="btn" onclick="submitPlan()">'+(ex?'予定を上書きして再提出':'予定を提出')+'</button></div>'+
+  '<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:.92rem">最近の自分</h3>'+(recent.length?'<div class="rowlist">'+recent.map(function(d){return dayRowHTML(d,'',true);}).join('')+'</div>':'<div class="hint">まだありません。</div>')+'</div>';
+}
+function parseSched(s){try{var a=JSON.parse(s||'[]');return Array.isArray(a)?a.map(function(b){return {taskId:String(b.taskId||b.title||''),title:String(b.title||''),hour:parseInt(b.hour,10)||8};}):[];}catch(e){return [];}}
+function pkHTML(m){
+  var placed={};planSched.forEach(function(b){placed[b.taskId]=true;});
+  var avail=myTasksFor(m).filter(function(t){return !placed[t.id];});
+  var kan='<div class="pk-col"><div class="pk-h">タスク</div><div class="pk-cards" id="pk-cards">'+(avail.length?avail.map(function(t){return '<div class="pk-card" draggable="true" data-id="'+escapeAttr(t.id)+'" data-title="'+escapeAttr(t.title)+'">'+escapeHtml(t.title)+'</div>';}).join(''):'<div class="hint">選べるタスクがありません'+(orgConfig&&orgConfig.trackSheetId?'（Trackで追加）':'（「タスク」タブで追加）')+'</div>')+'</div></div>';
+  var tl='';for(var h=8;h<=20;h++){var hh=(h<10?'0':'')+h;var bl=planSched.filter(function(b){return b.hour===h;});tl+='<div class="pt-row"><div class="pt-hr">'+hh+':00</div><div class="pt-area" data-hour="'+h+'">'+bl.map(function(b){return '<div class="pt-block" draggable="true" data-id="'+escapeAttr(b.taskId)+'"><span class="bt">'+escapeHtml(b.title)+'</span><button class="x" title="外す" onclick="planUnblock(\''+escapeAttr(b.taskId)+'\')">✕</button></div>';}).join('')+'</div></div>';}
+  return '<div class="pk-wrap">'+kan+'<div class="pt">'+tl+'</div></div>';
+}
+function rerenderPk(){var m=myMember();var el=document.getElementById('p_pk');if(el&&m){el.innerHTML=pkHTML(m);wirePlanDnD();}}
+function planUnblock(taskId){planSched=planSched.filter(function(b){return b.taskId!==taskId;});rerenderPk();}
+function wirePlanDnD(){
+  document.querySelectorAll('#pk-cards .pk-card').forEach(function(el){
+    el.addEventListener('dragstart',function(e){planDragId=el.dataset.id;planDragTitle=el.dataset.title;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',el.dataset.id)}catch(x){}});
+    el.addEventListener('dragend',function(){el.classList.remove('dragging')});
+  });
+  document.querySelectorAll('#p_pk .pt-block').forEach(function(el){
+    el.addEventListener('dragstart',function(e){planDragId=el.dataset.id;planDragTitle=null;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',el.dataset.id)}catch(x){}});
+    el.addEventListener('dragend',function(){el.classList.remove('dragging')});
+  });
+  document.querySelectorAll('#p_pk .pt-area').forEach(function(el){
+    el.addEventListener('dragover',function(e){e.preventDefault();el.classList.add('drop')});
+    el.addEventListener('dragleave',function(){el.classList.remove('drop')});
+    el.addEventListener('drop',function(e){e.preventDefault();el.classList.remove('drop');var hour=parseInt(el.dataset.hour,10);var id=planDragId;if(!id)return;
+      var b=planSched.filter(function(x){return x.taskId===id})[0];
+      if(b){b.hour=hour;}
+      else{var title=planDragTitle;if(!title){var mm=myMember();var mt=(mm?myTasksFor(mm):[]).filter(function(t){return t.id===id})[0];title=mt?mt.title:id;}planSched.push({taskId:id,title:title,hour:hour});}
+      planDragId=null;planDragTitle=null;rerenderPk();
+    });
+  });
+  var kc=document.getElementById('pk-cards');
+  if(kc){kc.addEventListener('dragover',function(e){e.preventDefault();kc.classList.add('drop')});kc.addEventListener('dragleave',function(){kc.classList.remove('drop')});kc.addEventListener('drop',function(e){e.preventDefault();kc.classList.remove('drop');if(planDragId){planSched=planSched.filter(function(x){return x.taskId!==planDragId});planDragId=null;rerenderPk();}});}
 }
 function mapsDirUrl(route,dest){
   var o='',d=(dest||'').trim();
@@ -568,38 +609,34 @@ function openMapsFromPlan(){
 }
 function wirePlanForm(){
   var seg=document.getElementById('p_kind');if(!seg)return;
-  var wf=document.getElementById('p_workfields');
-  function sync(){var on=seg.querySelector('button.on');wf.style.opacity=(on&&on.dataset.v==='休み')?'.5':'1';}
-  seg.querySelectorAll('button').forEach(function(b){b.onclick=function(){seg.querySelectorAll('button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');sync();};});sync();
+  function sync(){var on=seg.querySelector('button.on');var off=(on&&on.dataset.v==='休み');var b=document.getElementById('p_bus'),s=document.getElementById('p_sched');if(b)b.hidden=off;if(s)s.hidden=off;}
+  seg.querySelectorAll('button').forEach(function(b){b.onclick=function(){seg.querySelectorAll('button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');sync();};});
+  sync();wirePlanDnD();
 }
 async function submitPlan(){
   var m=myMember();if(!m){showToast('メンバー登録がありません');return;}
   var date=document.getElementById('p_date').value;if(!date){showToast('対象日を選んでください');return;}
   var kind=(document.querySelector('#p_kind button.on')||{dataset:{v:'出勤'}}).dataset.v;
-  var dest=document.getElementById('p_dest').value.trim(), route=document.getElementById('p_route').value.trim();
   var taskLocked=m.taskLock==='yes';
-  var planText='', offList=false;
+  var dest='',route='',planText='',schedJson='[]';
   if(kind==='休み'){planText='（休み予定）';}
   else{
-    var checked=[].slice.call(document.querySelectorAll('#p_tasks input:checked')).map(function(c){return c.value;});
-    var otherOn=document.getElementById('p_other_on')&&document.getElementById('p_other_on').checked;
-    var otherTxt=otherOn?((document.getElementById('p_other_txt')||{}).value||'').trim():'';
-    if(!checked.length&&!otherTxt){showToast('タスクを選ぶか、その他を記入してください');return;}
-    offList=!!otherTxt;
-    planText=checked.join('、')+(otherTxt?((checked.length?' / ':'')+'その他: '+otherTxt):'');
+    var de=document.getElementById('p_dest'),rt=document.getElementById('p_route');
+    dest=de?de.value.trim():'';route=rt?rt.value.trim():'';
+    if(!route){showToast('ルート（どう行くか）を入れてください');return;}
+    if(!planSched.length){showToast('タスクを時間帯にドラッグしてください');return;}
+    var sorted=planSched.slice().sort(function(a,b){return a.hour-b.hour;});
+    planText=sorted.map(function(b){return (b.hour<10?'0':'')+b.hour+':00 '+b.title;}).join(' / ');
+    schedJson=JSON.stringify(sorted);
   }
-  if(kind==='出勤'&&!route){showToast('ルート（どう行くか）を入れてください');return;}
-  var ps;
-  if(kind==='休み')ps=startStatus(m);
-  else if(taskLocked&&!offList)ps='ok';
-  else ps=startStatus(m);
+  var ps=(kind==='休み')?startStatus(m):(taskLocked?'ok':startStatus(m));
   var ex=dayByEmailDate(m.email,date);
   var obj=ex?Object.assign({},ex):{id:nextId('D',days),email:m.email,name:m.name,date:date,attend:'',inT:'',outT:'',actRoute:'',done:'',busDiff:'',repStatus:'',r1By:'',r1At:'',r1Act:'',r2By:'',r2At:'',r2Act:''};
-  Object.assign(obj,{planKind:kind,dest:kind==='休み'?'':dest,route:kind==='休み'?'':route,plan:planText,planStatus:ps,p1By:'',p1At:'',p1Act:'',p2By:'',p2At:'',p2Act:''});
+  Object.assign(obj,{planKind:kind,dest:dest,route:route,plan:planText,sched:schedJson,planStatus:ps,p1By:'',p1At:'',p1Act:'',p2By:'',p2At:'',p2Act:''});
   var btn=document.querySelector('.acts .btn');if(btn){btn.disabled=true;btn.textContent='提出中…';}
   try{await saveDay(obj);
-    var msg=(ps==='ok')?(taskLocked&&!offList?'指定タスクの予定を登録しました（承認不要）':'予定を保存しました（承認者未設定のため承認済）'):('予定を提出しました → '+nameOf(m.a1||m.a2)+'さんへ'+(offList?'（リスト外のため承認が必要）':''));
-    showToast(msg);render();syncMyCalendar();}
+    var msg=(ps==='ok')?(taskLocked?'予定を登録しました（指定タスクのみ・承認不要）':'予定を保存しました（承認者未設定のため承認済）'):('予定を提出しました → '+nameOf(m.a1||m.a2)+'さんへ');
+    showToast(msg);planSchedDate=null;render();syncMyCalendar();}
   catch(e){showToast('提出に失敗しました: '+(e.message||e));if(btn)btn.disabled=false;}
 }
 
