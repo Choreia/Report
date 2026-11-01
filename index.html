@@ -416,11 +416,16 @@ async function loadAllData(){
   sheetSettings={};parseRows(vr[3]&&vr[3].values,SETTING_FIELDS).forEach(function(r){sheetSettings[r.key]=r.value;});
   tasks=parseRows(vr[4]&&vr[4].values,TASK_FIELDS);
   trackLinkErr=null;
-  if(orgConfig&&orgConfig.trackSheetId){
-    try{
-      var td=await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+orgConfig.trackSheetId+'/values/'+encodeURIComponent('タスク!A2:K5000'));
-      tasks=(td.values||[]).map(function(r){return {id:r[0]||'',title:r[1]||'',assignee:r[5]||'',active:(r[3]==='done')?'no':'yes',memo:(r[2]||''),_src:'track'};}).filter(function(t){return t.id&&t.title;});
-    }catch(e){trackLinkErr=e;console.error('track tasks',e);}
+  var _tl=trackSheetsList();
+  if(_tl.length){
+    var merged=[],anyErr=false;
+    for(var _i=0;_i<_tl.length;_i++){
+      try{var td=await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+_tl[_i].id+'/values/'+encodeURIComponent('タスク!A2:K5000'));
+        var src=_tl[_i].name||('連携'+(_i+1));var pre='s'+_i+'_';
+        (td.values||[]).forEach(function(r){if(r[0]&&r[1]&&r[3]!=='done')merged.push({id:pre+r[0],title:r[1],assignee:r[5]||'',active:'yes',memo:(r[2]||''),src:src});});
+      }catch(e){anyErr=true;console.error('track tasks',e);}
+    }
+    tasks=merged;trackLinkErr=anyErr?new Error('一部の連携先を読めません'):null;
   }
   dataLoadError=null;
 }
@@ -468,23 +473,31 @@ function openSettings(){
   var h='<h3>⚙ 管理</h3><p class="hint">保存先: <a href="'+escapeAttr(ssUrl)+'" target="_blank" rel="noopener">スプレッドシートを開く</a>（'+escapeHtml(orgConfig.driveName||'')+' / '+escapeHtml(orgConfig.folderName||'')+'）</p>'+
     '<h3 style="font-size:.9rem;margin-top:14px">管理者 <span class="hint" style="font-weight:400">メンバー・承認ラインの編集と全データの閲覧ができます</span></h3><div id="role-admins"></div>'+
     '<div style="display:flex;gap:8px;margin-top:8px"><input id="add-admin" type="email" placeholder="メールアドレス" style="flex:1"><button class="btn small" onclick="addAdmin()">追加</button></div>'+
-    '<h3 style="font-size:.9rem;margin-top:16px">🔗 Track連携 <span class="hint" style="font-weight:400">予定で選ぶタスクをChoreia Trackから読み込みます</span></h3>'+
-    '<p class="hint" id="track-status">'+(orgConfig.trackSheetId?'連携中（シートID '+escapeHtml(String(orgConfig.trackSheetId).slice(0,10))+'…）':'未連携 ─ 連携すると、予定のタスクはTrackで管理するものになります')+'</p>'+
-    '<div style="display:flex;gap:8px;margin-top:6px"><input id="track-link-input" type="text" placeholder="Trackの共有URL か シートID" value="'+escapeAttr(orgConfig.trackSheetId||'')+'" style="flex:1"><button class="btn small" onclick="saveTrackLink()">保存</button></div>'+
-    '<p class="hint">Trackで対象プロジェクトを開き「🔗共有URL」をコピーして貼り付けてください。空で保存すると連携を解除します。</p>'+
+    '<h3 style="font-size:.9rem;margin-top:16px">🔗 Track連携 <span class="hint" style="font-weight:400">予定で選ぶタスクを複数のTrackプロジェクトから読み込みます</span></h3>'+
+    '<div id="track-list"></div>'+
+    '<div style="display:flex;gap:8px;margin-top:8px"><input id="track-name-input" type="text" placeholder="名前(任意)" style="flex:0 0 108px"><input id="track-link-input" type="text" placeholder="Trackの共有URL か シートID" style="flex:1"><button class="btn small" onclick="addTrackLink()">追加</button></div>'+
+    '<p class="hint">Trackで対象プロジェクトを開き「🔗共有URL」をコピーして追加。複数追加できます。</p>'+
     '<div class="actions"><button class="btn" onclick="closeModal()">閉じる</button></div>';
-  openModal(h);renderAdminList();
+  openModal(h);renderAdminList();renderTrackList();
 }
 function renderAdminList(){var owner=orgConfig.admin,list=orgConfig.admins||[owner],h='';list.forEach(function(email){h+='<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line);font-size:.86rem"><span style="flex:1">'+escapeHtml(email)+'</span>'+(email===owner?'<span class="badge b-acc">オーナー</span>':'<button class="btn ghost small" onclick="removeAdmin(\''+escapeAttr(email)+'\')">外す</button>')+'</div>';});var el=document.getElementById('role-admins');if(el)el.innerHTML=h||'<p class="hint">なし</p>';}
 async function addAdmin(){var i=document.getElementById('add-admin'),e=(i.value||'').trim().toLowerCase();if(!e||e.indexOf('@')===-1){showToast('メールアドレスを入力してください');return;}var list=orgConfig.admins||[orgConfig.admin];if(list.indexOf(e)!==-1){showToast('すでに登録済み');return;}list.push(e);orgConfig.admins=list;i.value='';renderAdminList();await saveConfig();showToast(e+' を追加しました');}
 async function removeAdmin(e){if(e===orgConfig.admin){showToast('オーナーは外せません');return;}orgConfig.admins=(orgConfig.admins||[]).filter(function(x){return x!==e;});renderAdminList();await saveConfig();showToast(e+' を外しました');}
 function parseTrackId(s){s=(s||'').trim();var m=s.match(/[?&]s=([a-zA-Z0-9_-]+)/);if(m)return m[1];m=s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);if(m)return m[1];return s;}
-async function saveTrackLink(){
-  var v=parseTrackId(document.getElementById('track-link-input').value);
-  orgConfig.trackSheetId=v;var ok=await saveConfig();
-  if(!ok){showToast('設定を保存できませんでした');return;}
-  showToast(v?'Trackと連携しました。タスクを読み込みます':'連携を解除しました');
-  await loadAllDataSafe();closeModal();render();
+function trackSheetsList(){if(orgConfig&&Array.isArray(orgConfig.trackSheets))return orgConfig.trackSheets;if(orgConfig&&orgConfig.trackSheetId)return [{id:orgConfig.trackSheetId,name:''}];return [];}
+function renderTrackList(){var links=trackSheetsList(),h='';links.forEach(function(l){h+='<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line);font-size:.85rem"><span style="flex:1;min-width:0">'+(l.name?escapeHtml(l.name)+' ':'')+'<span class="mono hint">'+escapeHtml(String(l.id).slice(0,12))+'…</span></span><button class="btn ghost small" onclick="removeTrackLink(\''+escapeAttr(l.id)+'\')">外す</button></div>';});var el=document.getElementById('track-list');if(el)el.innerHTML=h||'<p class="hint">未連携 ─ 連携すると予定のタスクはTrackのものになります</p>';}
+async function addTrackLink(){
+  var id=parseTrackId(document.getElementById('track-link-input').value);if(!id){showToast('URLかIDを入れてください');return;}
+  var name=(document.getElementById('track-name-input').value||'').trim();
+  var arr=trackSheetsList().slice();if(arr.some(function(x){return x.id===id;})){showToast('すでに追加済み');return;}
+  arr.push({id:id,name:name});orgConfig.trackSheets=arr;delete orgConfig.trackSheetId;
+  var ok=await saveConfig();if(!ok){showToast('保存できませんでした');return;}
+  document.getElementById('track-link-input').value='';document.getElementById('track-name-input').value='';
+  renderTrackList();showToast('追加しました。タスクを読み込みます');await loadAllDataSafe();render();
+}
+async function removeTrackLink(id){
+  orgConfig.trackSheets=trackSheetsList().filter(function(x){return x.id!==id;});delete orgConfig.trackSheetId;
+  await saveConfig();renderTrackList();showToast('外しました');await loadAllDataSafe();render();
 }
 
 // ==================== Tabs & render ====================
@@ -619,7 +632,7 @@ function pkHTML(m){
   var dayStart=H0*60,dayEnd=H1*60,canvasH=(dayEnd-dayStart)*PPM;
   var placed={};planSched.blocks.forEach(function(b){placed[b.taskId]=true;});
   var avail=myTasksFor(m).filter(function(t){return !placed[t.id];});
-  var pool='<div class="pk-pool" id="pk-pool">'+(avail.length?avail.map(function(t){return '<div class="pk-chip" draggable="true" data-id="'+escapeAttr(t.id)+'" data-title="'+escapeAttr(t.title)+'">'+escapeHtml(t.title)+'</div>';}).join(''):'<div class="pk-empty">選べるタスクがありません'+(orgConfig&&orgConfig.trackSheetId?'（Trackで追加）':'（「タスク」タブで追加）')+'</div>')+'</div>';
+  var pool='<div class="pk-pool" id="pk-pool">'+(avail.length?avail.map(function(t){return '<div class="pk-chip" draggable="true" data-id="'+escapeAttr(t.id)+'" data-title="'+escapeAttr(t.title)+'">'+escapeHtml(t.title)+'</div>';}).join(''):'<div class="pk-empty">選べるタスクがありません'+(trackSheetsList().length?'（Trackで追加）':'（「タスク」タブで追加）')+'</div>')+'</div>';
   var stepSel='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span class="hint">単位</span><select onchange="setPlanStep(this.value)" style="width:auto;padding:5px 9px">'+[15,30,60].map(function(n){return '<option value="'+n+'" '+(STEP===n?'selected':'')+'>'+n+'分</option>';}).join('')+'</select></div>';
   var gh='';for(var h=H0;h<=H1;h++){gh+='<div class="gh" style="top:'+(28+(h*60-dayStart)*PPM-5)+'px">'+(h<10?'0':'')+h+':00</div>';}
   var gutter='<div class="ptl2-gutter" style="height:'+(28+canvasH)+'px">'+gh+'</div>';
@@ -958,12 +971,13 @@ function viewOverview(){
 function myTasksFor(m){var e=(m.email||'').toLowerCase(),n=m.name||'';return tasks.filter(function(t){return t.active!=='no'&&((t.assignee||'')===''||(t.assignee||'').toLowerCase()===e||(t.assignee||'')===n);});}
 async function saveTaskRec(obj){obj.updatedAt=nowStr();var i=idxOf(tasks,obj.id);if(i===-1){tasks.push(obj);await appendRow('タスク',obj,TASK_FIELDS);}else{tasks[i]=obj;await updateRowByIndex('タスク',i,obj,TASK_FIELDS);}}
 function viewTasks(){
-  if(orgConfig&&orgConfig.trackSheetId){
-    var turl='https://choreia.github.io/Track/?s='+encodeURIComponent(orgConfig.trackSheetId)+'&tab=tasks';
-    var trs=tasks.map(function(t){return '<div class="cfgrow" style="grid-template-columns:1.7fr 1fr auto"><div style="min-width:0"><b>'+escapeHtml(t.title)+'</b>'+(t.memo?'<br><span class="hint">'+escapeHtml(t.memo)+'</span>':'')+'</div><div>'+escapeHtml(t.assignee||'全員')+'</div><div>'+(t.active==='no'?'<span class="badge b-mut">完了</span>':'<span class="badge b-ok">有効</span>')+'</div></div>';}).join('');
-    return '<h2>タスク（Track連携中）</h2><p class="viewdesc">タスクはChoreia Trackで管理しています。ここは参照のみ。追加・編集・時間割は <a href="'+turl+'" target="_blank" rel="noopener">Trackのタスク</a> で行います。</p>'+
-      (trackLinkErr?'<div class="note" style="border-color:var(--bad);color:var(--bad);background:var(--bad-soft)">Trackのタスクを読み込めませんでした。連携先のスプレッドシートにアクセスできるか確認してください（⚙管理で設定）。</div>':'')+
-      (tasks.length?'<div class="card"><div class="cfghdr" style="grid-template-columns:1.7fr 1fr auto"><div>タスク</div><div>割当</div><div>状態</div></div>'+trs+'</div>':'<div class="emptybox">Trackにタスクがありません。Trackで追加してください。</div>');
+  var _tl=trackSheetsList();
+  if(_tl.length){
+    var links=_tl.map(function(l,i){return '<a href="https://choreia.github.io/Track/?s='+encodeURIComponent(l.id)+'&tab=tasks" target="_blank" rel="noopener">'+escapeHtml(l.name||('連携'+(i+1)))+'</a>';}).join(' ／ ');
+    var trs=tasks.map(function(t){return '<div class="cfgrow" style="grid-template-columns:1.7fr 1fr auto"><div style="min-width:0"><b>'+escapeHtml(t.title)+'</b>'+(t.memo?'<br><span class="hint">'+escapeHtml(t.memo)+'</span>':'')+'</div><div>'+escapeHtml(t.assignee||'全員')+'<br><span class="hint">'+escapeHtml(t.src||'')+'</span></div><div><span class="badge b-ok">有効</span></div></div>';}).join('');
+    return '<h2>タスク（Track連携中）</h2><p class="viewdesc">タスクは複数のChoreia Trackプロジェクトで管理しています（'+links+'）。ここは参照のみ。追加・編集・時間割はTrackで行います。</p>'+
+      (trackLinkErr?'<div class="note" style="border-color:var(--bad);color:var(--bad);background:var(--bad-soft)">一部の連携先を読み込めませんでした。⚙管理で確認してください。</div>':'')+
+      (tasks.length?'<div class="card"><div class="cfghdr" style="grid-template-columns:1.7fr 1fr auto"><div>タスク</div><div>割当 / 連携元</div><div>状態</div></div>'+trs+'</div>':'<div class="emptybox">連携先にタスクがありません。Trackで追加してください。</div>');
   }
   var rows=tasks.map(function(t){
     var who=t.assignee?nameOf(t.assignee):'全員';
