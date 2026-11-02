@@ -350,7 +350,10 @@ async function findConfig(){
 }
 async function refreshConfigFromDrive(){
   try{var data=await apiFetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent("name='"+CONFIG_FILENAME+"' and trashed=false")+'&corpora=allDrives&includeItemsFromAllDrives=true&supportsAllDrives=true&fields=files(id)');
-    for(var i=0;i<(data.files||[]).length;i++){try{var c=await apiFetch('https://www.googleapis.com/drive/v3/files/'+data.files[i].id+'?alt=media&supportsAllDrives=true');if(c.domain===currentUser.domain){orgConfig=c;orgConfig.configFileId=data.files[i].id;saveCachedConfig();return;}}catch(e){}}
+    for(var i=0;i<(data.files||[]).length;i++){try{var c=await apiFetch('https://www.googleapis.com/drive/v3/files/'+data.files[i].id+'?alt=media&supportsAllDrives=true');if(c.domain===currentUser.domain){var before=JSON.stringify((orgConfig&&orgConfig.trackSheets)||[])+'|'+((orgConfig&&orgConfig.spreadsheetId)||'');orgConfig=c;orgConfig.configFileId=data.files[i].id;saveCachedConfig();
+        var after=JSON.stringify(orgConfig.trackSheets||[])+'|'+(orgConfig.spreadsheetId||'');
+        if(before!==after){await loadAllDataSafe();render();} // Track連携などが他の端末で変わっていたら、開いたままのタブにも反映する
+        return;}}catch(e){}}
   }catch(e){}
 }
 async function saveConfig(){
