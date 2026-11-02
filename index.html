@@ -594,7 +594,7 @@ function viewPlan(){
   '<p class="viewdesc">明日の時間割を組みます。左のタスクを右の時間帯にドラッグして差し込み、提出すると '+escapeHtml(a1n)+(a2n?'（1次）→ '+escapeHtml(a2n)+'（2次）':'')+' の承認へ回ります。</p>'+
   '<div class="card"><div style="display:flex;gap:18px;flex-wrap:wrap"><div><label class="fl">対象日</label>'+planCalHTML(m)+'</div><div style="flex:1;min-width:160px"><label class="fl">区分</label><div class="seg" id="p_kind">'+PLAN_KINDS.map(function(k){return '<button class="'+(k===kind?'on':'')+'" data-v="'+k+'">'+k+'</button>';}).join('')+'</div>'+
     (ex?'<div style="margin-top:10px">現在の状態：'+phaseBadge(ex.planStatus)+(locked?'<br><span class="hint">上書きすると、もう一度1次から承認されます。</span>':'')+'</div>':'')+'</div></div></div>'+
-  '<div class="card" id="p_bus"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">バス</h3><label class="fl">行き先</label><input type="text" id="p_dest" value="'+escapeAttr(dest)+'" placeholder="例：カスミ ○○店 / 社内 / 在宅"><label class="fl">ルート（どう行くか）</label><input type="text" id="p_route" value="'+escapeAttr(route)+'" placeholder="例：榛原→細江"><div style="margin-top:7px"><button type="button" class="btn ghost small" onclick="openMapsFromPlan()">🗺 Googleマップでルートを開く</button></div></div>'+
+  '<div class="card" id="p_bus"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">バス</h3><label class="fl">行き先</label><input type="text" id="p_dest" value="'+escapeAttr(dest)+'" placeholder="例：カスミ ○○店 / 社内 / 在宅"><label class="fl">ルート（どう行くか）<span class="hint" style="font-weight:400;margin-left:6px">任意</span></label><input type="text" id="p_route" value="'+escapeAttr(route)+'" placeholder="例：榛原→細江"><div style="margin-top:7px"><button type="button" class="btn ghost small" onclick="openMapsFromPlan()">🗺 Googleマップでルートを開く</button></div></div>'+
   '<div class="card" id="p_sched"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">やること（明日の時間割）<span class="hint" style="font-weight:400;margin-left:6px">タスクを時間帯へドラッグ</span></h3><div id="p_pk">'+pkHTML(m)+'</div></div>'+
   '<div class="card" id="p_note"><h3 style="margin:0 0 4px;font-size:.98rem">自由に書く<span class="hint" style="font-weight:400;margin-left:6px">時間割に乗らない予定・補足・考えていること</span></h3><textarea id="p_note_txt" rows="4" placeholder="例：午前中に見積の下書き。移動中に○○社へ電話。夕方は来週の準備。">'+escapeHtml(ex?ex.planNote:'')+'</textarea></div>'+
   '<div class="note"><b>あなたの承認者</b>　1次：'+escapeHtml(a1n)+(a2n?'／2次：'+escapeHtml(a2n):'')+'</div>'+
@@ -721,7 +721,6 @@ async function submitPlan(asDraft){
   else{
     var de=document.getElementById('p_dest'),rt=document.getElementById('p_route');
     dest=de?de.value.trim():'';route=rt?rt.value.trim():'';
-    if(!asDraft&&!route){showToast('ルート（どう行くか）を入れてください');return;}
     if(!asDraft&&!planSched.blocks.length&&!note){showToast('タスクを時間帯にドラッグするか、「自由に書く」に予定を書いてください');return;}
     var sorted=planSched.blocks.slice().sort(function(a,b){return (a.lane-b.lane)||(a.start-b.start);});
     planText=sorted.map(function(b){var ln=planSched.lanes[b.lane]||'自分';return ln+' '+fmtMin(b.start)+'–'+fmtMin(b.start+b.dur)+' '+b.title;}).join(' / ');
