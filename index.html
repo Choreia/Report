@@ -434,6 +434,22 @@ async function loadAllDataSafe(){try{await loadAllData();}catch(e){dataLoadError
 async function appendRow(sheet,obj,fields){await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+getSheetId()+'/values/'+encodeURIComponent(sheet+'!A:ZZ')+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:[toRow(obj,fields)]})});}
 async function updateRowByIndex(sheet,rowIndex,obj,fields){var range=sheet+'!A'+(rowIndex+2)+':'+colLetter(fields.length)+(rowIndex+2);await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+getSheetId()+'/values/'+encodeURIComponent(range)+'?valueInputOption=RAW',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:[toRow(obj,fields)]})});}
 async function saveMember(obj){obj.updatedAt=nowStr();var i=idxOf(members,obj.id);if(i===-1){members.push(obj);await appendRow('メンバー',obj,MEMBER_FIELDS);}else{members[i]=obj;await updateRowByIndex('メンバー',i,obj,MEMBER_FIELDS);}}
+function canDeletePlan(d){if(!d)return false;var me=currentUser.email.toLowerCase();var mine=(d.email||'').toLowerCase()===me;return (mine&&d.repStatus==='')||isAdmin();}
+async function deleteDay(id){
+  var d=byId(days,id);if(!d){showToast('見つかりません');return;}
+  if(!canDeletePlan(d)){showToast('この予定は削除できません(実行報告が始まっています)');return;}
+  if(!confirm(fmtDate(d.date)+' の予定を削除します。承認のやりとりも含めて元に戻せません。よろしいですか？'))return;
+  try{
+    await loadAllData(); // 行番号のずれを防ぐため最新を読む
+    var i=idxOf(days,id);if(i===-1){showToast('すでに削除されています');render();return;}
+    var meta=await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+getSheetId()+'?fields=sheets.properties');var gid=null;(meta.sheets||[]).forEach(function(sh){if(sh.properties.title==='日次')gid=sh.properties.sheetId;});
+    if(gid===null)throw new Error('日次シートが見つかりません');
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+getSheetId()+':batchUpdate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests:[{deleteDimension:{range:{sheetId:gid,dimension:'ROWS',startIndex:i+1,endIndex:i+2}}}]})});
+    if(d.calEventId){try{await authFetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+encodeURIComponent(d.calEventId),{method:'DELETE'});}catch(e){}}
+    days.splice(i,1);if(selId===id)selId=null;planSchedDate=null;showToast('予定を削除しました');render();
+  }catch(e){console.error(e);showToast('削除に失敗しました: '+(e.message||e));}
+}
+function editPlanOf(id){var d=byId(days,id);if(!d)return;tab='plan';selId=null;planPick(d.date);}
 async function saveDay(obj){obj.updatedAt=nowStr();var i=idxOf(days,obj.id);if(i===-1){days.push(obj);await appendRow('日次',obj,DAY_FIELDS);}else{days[i]=obj;await updateRowByIndex('日次',i,obj,DAY_FIELDS);}}
 async function addComment(dayId,phase,text){var c={id:nextId('C',comments),dayId:dayId,phase:phase,by:currentUser.email,byName:currentUser.name,at:nowStr(),text:text};comments.push(c);await appendRow('やりとり',c,COMMENT_FIELDS);}
 
@@ -598,7 +614,7 @@ function viewPlan(){
   '<div class="card" id="p_sched"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">やること（明日の時間割）<span class="hint" style="font-weight:400;margin-left:6px">タスクを時間帯へドラッグ</span></h3><div id="p_pk">'+pkHTML(m)+'</div></div>'+
   '<div class="card" id="p_note"><h3 style="margin:0 0 4px;font-size:.98rem">自由に書く<span class="hint" style="font-weight:400;margin-left:6px">時間割に乗らない予定・補足・考えていること</span></h3><textarea id="p_note_txt" rows="4" placeholder="例：午前中に見積の下書き。移動中に○○社へ電話。夕方は来週の準備。">'+escapeHtml(ex?ex.planNote:'')+'</textarea></div>'+
   '<div class="note"><b>あなたの承認者</b>　1次：'+escapeHtml(a1n)+(a2n?'／2次：'+escapeHtml(a2n):'')+'</div>'+
-  '<div class="acts"><button class="btn ghost" onclick="submitPlan(true)">一時保存</button><button class="btn" onclick="submitPlan(false)">'+((ex&&ex.planStatus)?'上書きして提出':'提出する')+'</button></div>'+
+  '<div class="acts"><button class="btn ghost" onclick="submitPlan(true)">一時保存</button><button class="btn" onclick="submitPlan(false)">'+((ex&&ex.planStatus)?'上書きして提出':'提出する')+'</button>'+(ex&&canDeletePlan(ex)?'<button class="btn ghost" style="margin-left:auto;color:var(--bad,#b3261e)" onclick="deleteDay(\''+ex.id+'\')">この予定を削除</button>':'')+'</div>'+
   '<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:.92rem">最近の自分</h3>'+(recent.length?'<div class="rowlist">'+recent.map(function(d){return dayRowHTML(d,'',true);}).join('')+'</div>':'<div class="hint">まだありません。</div>')+'</div>';
 }
 function loadLanes(){try{var a=JSON.parse(localStorage.getItem('choreia_report_lanes')||'null');if(Array.isArray(a)&&a.length)return a.slice();}catch(e){}return ['自分','エージェント1'];}
@@ -785,7 +801,7 @@ async function submitReport(id){
 // ==================== view: mine ====================
 function viewMine(){
   var m=myMember();var mine=m?daysOf(m.email):[];
-  return '<h2>自分の履歴</h2><p class="viewdesc">予定と実行報告の状況。クリックで中身を確認できます。</p>'+
+  return '<h2>自分の履歴</h2><p class="viewdesc">予定と実行報告の状況。クリックで中身を確認できます。実行報告がまだの予定は、右の「予定を編集」で直せます(再提出すると1次から承認し直し)。「削除」で取り消せます。</p>'+
     (mine.length?'<div class="cols split"><div><div class="rowlist">'+mine.map(function(d){return dayRowHTML(d,'',true);}).join('')+'</div></div><div>'+(selId?detailHTML(byId(days,selId),true):'<div class="detail dash"><div class="emptybox">選ぶと中身が出ます。</div></div>')+'</div></div>'
     :'<div class="emptybox">まだ予定・報告がありません。「予定を出す」から始めてください。</div>');
 }
@@ -841,7 +857,9 @@ function detailHTML(d,readonly){
   function cmts(list){return list.length?'<div style="margin:8px 0 0">'+list.map(function(c){return '<div style="font-size:.82rem;background:var(--panel);border-radius:8px;padding:7px 10px;margin-bottom:5px"><b>'+escapeHtml(c.byName||nameOf(c.by))+'</b> <span class="mono hint">'+escapeHtml(c.at)+'</span><br>'+escapeHtml(c.text)+'</div>';}).join('')+'</div>':'';}
   var h='<div class="detail"><div class="dhead"><span class="ava">'+escapeHtml(ini(d.name))+'</span>'+
     '<div><div style="font-weight:900;font-family:\'Zen Kaku Gothic New\'">'+escapeHtml(d.name)+'</div><div class="hint">'+escapeHtml(m.dept||'')+' ・ '+fmtDate(d.date)+' ・ <span class="mono">'+escapeHtml(d.id)+'</span></div></div>'+
-    '<div style="margin-left:auto">'+(dayState(d)==='done'?'<span class="badge b-ok">完了</span>':'')+'</div></div>';
+    '<div style="margin-left:auto;display:flex;gap:6px;align-items:center">'+(dayState(d)==='done'?'<span class="badge b-ok">完了</span>':'')+
+    ((d.email||'').toLowerCase()===currentUser.email.toLowerCase()&&d.repStatus===''?'<button class="btn ghost small" onclick="editPlanOf(\''+d.id+'\')">予定を編集</button>':'')+
+    (canDeletePlan(d)?'<button class="btn ghost small" style="color:var(--bad,#b3261e)" onclick="deleteDay(\''+d.id+'\')">削除</button>':'')+'</div></div>';
   // PLAN phase
   h+='<div class="phasebox plan"><h4><span class="phase-tag tag-plan">計画</span> 予定 '+phaseBadge(d.planStatus)+'</h4>'+
     (d.planKind==='休み'?'<div class="drow"><span class="k">区分</span><span>休み予定</span></div>':
