@@ -248,12 +248,12 @@ var TASK_FIELDS=['id','title','assignee','active','memo','updatedAt'];
 var DAY_FIELDS=['id','email','name','date',
   'planKind','dest','route','plan','planStatus','p1By','p1At','p1Act','p2By','p2At','p2Act',
   'attend','inT','outT','actRoute','done','busDiff','repStatus','r1By','r1At','r1Act','r2By','r2At','r2Act',
-  'sched','calEventId','updatedAt'];
+  'sched','calEventId','updatedAt','planNote'];
 var COMMENT_FIELDS=['id','dayId','phase','by','byName','at','text'];
 var SETTING_FIELDS=['key','value'];
 var SHEET_DEFS=[
   {title:'メンバー',fields:MEMBER_FIELDS,headers:['ID','氏名','氏名(英)','所属','メール','申請ルート','1次承認者','2次承認者','在籍','タスク限定','メモ','更新日']},
-  {title:'日次',fields:DAY_FIELDS,headers:['ID','メール','氏名','対象日','予定区分','行き先','予定ルート','やること','計画状態','計画1次者','計画1次時刻','計画1次処理','計画2次者','計画2次時刻','計画2次処理','勤怠','出社','退社','実ルート','実行内容','ルート外','報告状態','報告1次者','報告1次時刻','報告1次処理','報告2次者','報告2次時刻','報告2次処理','時間割データ','予定イベントID','更新日']},
+  {title:'日次',fields:DAY_FIELDS,headers:['ID','メール','氏名','対象日','予定区分','行き先','予定ルート','やること','計画状態','計画1次者','計画1次時刻','計画1次処理','計画2次者','計画2次時刻','計画2次処理','勤怠','出社','退社','実ルート','実行内容','ルート外','報告状態','報告1次者','報告1次時刻','報告1次処理','報告2次者','報告2次時刻','報告2次処理','時間割データ','予定イベントID','更新日','自由記入']},
   {title:'やりとり',fields:COMMENT_FIELDS,headers:['ID','日次ID','フェーズ','送信者メール','送信者','時刻','本文']},
   {title:'設定',fields:SETTING_FIELDS,headers:['キー','値']},
   {title:'タスク',fields:TASK_FIELDS,headers:['ID','タスク','割当','有効','メモ','更新日']}
@@ -399,6 +399,7 @@ async function ensureSchema(){
     var meta=await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+ssId+'?fields=sheets.properties');
     var have={};(meta.sheets||[]).forEach(function(sh){have[sh.properties.title]=sh.properties.sheetId;});
     var missing=SHEET_DEFS.filter(function(d){return have[d.title]===undefined;});
+    try{var hd=await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+ssId+'/values/'+encodeURIComponent('日次!1:1'));var hv=(hd.values&&hd.values[0])||[];var want=SHEET_DEFS[1].headers;if(hv.length<want.length&&hv.length>0){await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+ssId+'/values/'+encodeURIComponent('日次!'+colLetter(hv.length+1)+'1')+'?valueInputOption=RAW',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:[want.slice(hv.length)]})});}}catch(e){console.error('header',e);}
     if(missing.length){
       await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+ssId+':batchUpdate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests:missing.map(function(d){return {addSheet:{properties:{title:d.title,gridProperties:{frozenRowCount:1}}}};})})});
       await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/'+ssId+'/values:batchUpdate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({valueInputOption:'RAW',data:missing.map(function(d){return {range:d.title+'!A1',values:[d.headers]};})})});
@@ -440,7 +441,7 @@ async function addComment(dayId,phase,text){var c={id:nextId('C',comments),dayId
 // 他人のカレンダーには書けないので、本人のセッションで自分の承認済み予定だけを同期する。
 function calEventBody(d){
   var title=(d.planKind==='休み')?'休み':((d.dest?d.dest:'予定')+(d.route?'（'+d.route+'）':''));
-  var desc=(d.planKind==='休み')?'休み予定':('ルート: '+(d.route||'—')+'\nやること:\n'+(d.plan||''));
+  var desc=(d.planKind==='休み')?'休み予定':('ルート: '+(d.route||'—')+'\nやること:\n'+(d.plan||'')+((d.planNote&&d.planNote!==d.plan)?'\n自由記入:\n'+d.planNote:''));
   var end=new Date(d.date+'T00:00:00');end.setDate(end.getDate()+1);
   return {summary:title,description:desc,start:{date:d.date},end:{date:isoOf(end)},source:{title:'Choreia 報告',url:location.href}};
 }
@@ -595,6 +596,7 @@ function viewPlan(){
     (ex?'<div style="margin-top:10px">現在の状態：'+phaseBadge(ex.planStatus)+(locked?'<br><span class="hint">上書きすると、もう一度1次から承認されます。</span>':'')+'</div>':'')+'</div></div></div>'+
   '<div class="card" id="p_bus"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">バス</h3><label class="fl">行き先</label><input type="text" id="p_dest" value="'+escapeAttr(dest)+'" placeholder="例：カスミ ○○店 / 社内 / 在宅"><label class="fl">ルート（どう行くか）</label><input type="text" id="p_route" value="'+escapeAttr(route)+'" placeholder="例：榛原→細江"><div style="margin-top:7px"><button type="button" class="btn ghost small" onclick="openMapsFromPlan()">🗺 Googleマップでルートを開く</button></div></div>'+
   '<div class="card" id="p_sched"'+(off?' hidden':'')+'><h3 style="margin:0 0 4px;font-size:.98rem">やること（明日の時間割）<span class="hint" style="font-weight:400;margin-left:6px">タスクを時間帯へドラッグ</span></h3><div id="p_pk">'+pkHTML(m)+'</div></div>'+
+  '<div class="card" id="p_note"><h3 style="margin:0 0 4px;font-size:.98rem">自由に書く<span class="hint" style="font-weight:400;margin-left:6px">時間割に乗らない予定・補足・考えていること</span></h3><textarea id="p_note_txt" rows="4" placeholder="例：午前中に見積の下書き。移動中に○○社へ電話。夕方は来週の準備。">'+escapeHtml(ex?ex.planNote:'')+'</textarea></div>'+
   '<div class="note"><b>あなたの承認者</b>　1次：'+escapeHtml(a1n)+(a2n?'／2次：'+escapeHtml(a2n):'')+'</div>'+
   '<div class="acts"><button class="btn ghost" onclick="submitPlan(true)">一時保存</button><button class="btn" onclick="submitPlan(false)">'+((ex&&ex.planStatus)?'上書きして提出':'提出する')+'</button></div>'+
   '<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:.92rem">最近の自分</h3>'+(recent.length?'<div class="rowlist">'+recent.map(function(d){return dayRowHTML(d,'',true);}).join('')+'</div>':'<div class="hint">まだありません。</div>')+'</div>';
@@ -714,20 +716,22 @@ async function submitPlan(asDraft){
   var kind=(document.querySelector('#p_kind button.on')||{dataset:{v:'出勤'}}).dataset.v;
   var taskLocked=m.taskLock==='yes';
   var dest='',route='',planText='',schedJson='[]';
+  var noteEl=document.getElementById('p_note_txt');var note=noteEl?noteEl.value.trim():'';
   if(kind==='休み'){planText='（休み予定）';}
   else{
     var de=document.getElementById('p_dest'),rt=document.getElementById('p_route');
     dest=de?de.value.trim():'';route=rt?rt.value.trim():'';
     if(!asDraft&&!route){showToast('ルート（どう行くか）を入れてください');return;}
-    if(!asDraft&&!planSched.blocks.length){showToast('タスクを時間帯にドラッグしてください');return;}
+    if(!asDraft&&!planSched.blocks.length&&!note){showToast('タスクを時間帯にドラッグするか、「自由に書く」に予定を書いてください');return;}
     var sorted=planSched.blocks.slice().sort(function(a,b){return (a.lane-b.lane)||(a.start-b.start);});
     planText=sorted.map(function(b){var ln=planSched.lanes[b.lane]||'自分';return ln+' '+fmtMin(b.start)+'–'+fmtMin(b.start+b.dur)+' '+b.title;}).join(' / ');
+    if(!planText&&note)planText=note;
     schedJson=JSON.stringify({lanes:planSched.lanes,blocks:sorted});
   }
   var ps=asDraft?'':((kind==='休み')?startStatus(m):(taskLocked?'ok':startStatus(m)));
   var ex=dayByEmailDate(m.email,date);
   var obj=ex?Object.assign({},ex):{id:nextId('D',days),email:m.email,name:m.name,date:date,attend:'',inT:'',outT:'',actRoute:'',done:'',busDiff:'',repStatus:'',r1By:'',r1At:'',r1Act:'',r2By:'',r2At:'',r2Act:''};
-  Object.assign(obj,{planKind:kind,dest:dest,route:route,plan:planText,sched:schedJson,planStatus:ps,p1By:'',p1At:'',p1Act:'',p2By:'',p2At:'',p2Act:''});
+  Object.assign(obj,{planKind:kind,dest:dest,route:route,plan:planText,planNote:note,sched:schedJson,planStatus:ps,p1By:'',p1At:'',p1Act:'',p2By:'',p2At:'',p2Act:''});
   var btns=document.querySelectorAll('.acts .btn');btns.forEach(function(b){b.disabled=true;});
   try{await saveDay(obj);
     var msg=asDraft?'一時保存しました（未提出）':((ps==='ok')?(taskLocked?'予定を登録しました（指定タスクのみ・承認不要）':'予定を保存しました（承認者未設定のため承認済）'):('予定を提出しました → '+nameOf(m.a1||m.a2)+'さんへ'));
@@ -842,7 +846,7 @@ function detailHTML(d,readonly){
   // PLAN phase
   h+='<div class="phasebox plan"><h4><span class="phase-tag tag-plan">計画</span> 予定 '+phaseBadge(d.planStatus)+'</h4>'+
     (d.planKind==='休み'?'<div class="drow"><span class="k">区分</span><span>休み予定</span></div>':
-      '<div class="drow"><span class="k">行き先</span><span>'+(escapeHtml(d.dest)||'—')+'</span></div><div class="drow"><span class="k">ルート</span><span>'+(escapeHtml(d.route)||'—')+(mapsDirUrl(d.route,d.dest)?' <a href="'+escapeAttr(mapsDirUrl(d.route,d.dest))+'" target="_blank" rel="noopener" class="mono" style="font-size:.78rem">🗺 地図</a>':'')+'</span></div><div class="drow" style="grid-template-columns:1fr"><span class="k">やること</span></div><div class="body-txt">'+(escapeHtml(d.plan)||'<span class="hint">（記載なし）</span>')+'</div>')+
+      '<div class="drow"><span class="k">行き先</span><span>'+(escapeHtml(d.dest)||'—')+'</span></div><div class="drow"><span class="k">ルート</span><span>'+(escapeHtml(d.route)||'—')+(mapsDirUrl(d.route,d.dest)?' <a href="'+escapeAttr(mapsDirUrl(d.route,d.dest))+'" target="_blank" rel="noopener" class="mono" style="font-size:.78rem">🗺 地図</a>':'')+'</span></div><div class="drow" style="grid-template-columns:1fr"><span class="k">やること</span></div><div class="body-txt">'+(escapeHtml(d.plan)||'<span class="hint">（記載なし）</span>')+'</div>'+((d.planNote&&d.planNote!==d.plan)?'<div class="drow" style="grid-template-columns:1fr"><span class="k">自由記入</span></div><div class="body-txt">'+escapeHtml(d.planNote)+'</div>':''))+
     phaseChain(d,'plan',m)+cmts(cmP)+
     (actPlan?'<label class="fl">コメント（差戻しは必須）</label><textarea id="cmt_plan" rows="2" placeholder="例：ルートの根拠を書いてください"></textarea><div class="acts"><button class="btn ok" onclick="approvePhase(\''+d.id+'\',\'plan\')">'+(d.planStatus==='wait2'?'承認（最終）':(m.a2?'承認して2次へ':'承認する'))+'</button><button class="btn ghost" onclick="sendBackPhase(\''+d.id+'\',\'plan\')">差戻し</button></div>':'')+
     '</div>';
